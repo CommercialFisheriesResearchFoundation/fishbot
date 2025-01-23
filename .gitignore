@@ -1,0 +1,22 @@
+# History files
+.Rhistory
+.Rapp.history
+.Rproj.user
+
+# Session Data files
+.RData
+
+# User-specific files
+.Ruserdata
+
+# RStudio files
+.Rproj.user/
+
+# local folders
+/figures
+
+# python environemnt stuff
+python/env/
+python/data/
+*.csv
+
