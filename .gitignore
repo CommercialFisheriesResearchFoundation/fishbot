@@ -19,4 +19,12 @@
 python/env/
 python/data/
 *.csv
+*.png
+*.nc
+*.log*
+*.log
+*.sh
+*.env
+*.ipynb
+
 
