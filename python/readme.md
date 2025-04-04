@@ -1,3 +1,3 @@
-# About!
+# FIShBOT
 
 This is a note!

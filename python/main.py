@@ -23,7 +23,7 @@ import gc
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 handler = TimedRotatingFileHandler(
-    'application.log', when='midnight', interval=1, backupCount=7)
+    'fishbot.log', when='midnight', interval=1, backupCount=7)
 formatter = logging.Formatter(
     '%(asctime)s - %(name)s - %(levelname)s - %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
 handler.setFormatter(formatter)
@@ -39,6 +39,8 @@ DB_TABLE = os.getenv('DB_TABLE')
 DB_ARCHIVE_TABLE = os.getenv('DB_ARCHIVE_TABLE')
 DB_EVENTS_TABLE = os.getenv('DB_EVENTS_TABLE')
 BUCKET_NAME = os.getenv('BUCKET_NAME')
+AWS_REGION = os.getenv('AWS_REGION')
+AWS_PROFILE = os.getenv('AWS_PROFILE')
 
 DATASETS = {
     "cfrf": {
@@ -116,7 +118,7 @@ def standardize_df(df, dataset_id) -> pd.DataFrame:
                 df.shape[0], df.shape[1])
     if dataset_id == 'eMOLT_RT':
         try:
-            # eMOLT data just bottom temperature 
+            # eMOLT data just bottom temperature
             df['time'] = pd.to_datetime(df['time'])
             filt = ['time', 'latitude', 'longitude', 'temperature']
 
@@ -143,7 +145,7 @@ def standardize_df(df, dataset_id) -> pd.DataFrame:
 
             df['flag'] = df.groupby('tow_id')['DO'].transform(
                 lambda x: (x - x.mean()).abs() > 3 * x.std())
-            df = df[df['flag'] == False]
+            df = df[df['flag'] is False]
             # find short tow_ids
             df = df[df['tow_id'].astype(str).str.len() >= 10]
             df['DO_filtered'] = df.groupby('tow_id')['DO'].transform(
@@ -186,7 +188,7 @@ def standardize_df(df, dataset_id) -> pd.DataFrame:
             df['time'] = df['time'].dt.tz_localize(None)
             df['flag'] = df.groupby('tow_id')['dissolved_oxygen'].transform(
                 lambda x: (x - x.mean()).abs() > 3 * x.std())
-            df = df[df['flag'] == False]
+            df = df[df['flag'] is False]
             df['data_provider'] = 'CFRF'
             existing_columns = [col for col in keepers if col in df.columns]
             return df[existing_columns]
@@ -221,30 +223,42 @@ def load_local_studyfleet(gdf_grid, last_runtime) -> pd.DataFrame:
     return study_fleet
 
 
-def determine_reload_schedule(months=1) -> tuple:
+def determine_reload_schedule() -> tuple:
     """Determine the reload schedule based on the current date and return query time"""
     try:
         today = datetime.now()
+        # Annual reload
+        if today.month == 1 and today.day == 1:
+            logger.info("Annual reload scheduled")
+            return 'full', '1995-01-25T00:00:00Z'
 
-        quarterly_months = [1, 5, 7, 10]
-        if today.month in quarterly_months:
-            logger.debug("Quarterly reload, checking day of month")
-            if today.day <= 7:
-                logger.debug("Full reload scheduled")
-                return 'full', '1995-01-25T00:00:00Z'
+        # Quarterly reload
+        quarterly_months = [4, 7, 10]
+        if today.month in quarterly_months and today.day <= 1:
+            logger.info("Quarterly reload scheduled")
+            fetch_threshold = today - relativedelta(years=1)
+            return 'quarterly', fetch_threshold.isoformat()
 
-        fetch_threshold = today - relativedelta(months=months)
-        logger.debug(
-            "Partial reload scheduled, fetching data after %s", fetch_threshold)
-        return 'partial', fetch_threshold
+        # Bi-weekly reload
+        if today.day in [1, 15]:
+            logger.info("Bi-weekly reload scheduled")
+            fetch_threshold = today - relativedelta(months=1)
+            return 'bi-weekly', fetch_threshold.isoformat()
+
+        # Daily reload
+        fetch_threshold = today - relativedelta(days=5)
+        logger.info("Daily reload scheduled")
+        return 'daily', fetch_threshold.isoformat()
+
     except Exception as e:
         logger.error("Error determining reload schedule: %s", e)
         return None, None
 
 
-def main(reload_type, query_time, current_time):
+def main(reload_type, query_time):
     """ main function to call all subroutines"""
 
+    current_time = datetime.now(timezone.utc).isoformat()
     logger.info('reload type: %s fetching data after %s',
                 reload_type, query_time)
 
@@ -381,14 +395,14 @@ def main(reload_type, query_time, current_time):
     except Exception as e:
         logger.error("Error archiving fishbot: %s", e)
     try:
-        s3 = S3Connector()
+        s3 = S3Connector(BUCKET_NAME, AWS_REGION, AWS_PROFILE)
         logger.info("Pushing fishbot archive to S3")
-        s3.push_to_s3(fishbot_archive, BUCKET_NAME, prefix='archive')
+        s3.push_to_s3(fishbot_archive, prefix='archive')
         archive_key = s3.get_archive_key()
         logger.info("Archive key: %s", archive_key)
         logger.info("Pushed fishbot archive to S3")
         logger.info("Pushing fishbot_realtime to S3")
-        s3.push_to_s3(files, BUCKET_NAME)
+        s3.push_to_s3(files)
         logger.info("Pushed fishbot_realtime to S3")
     except Exception as e:
         logger.error("Error archiving fishbot: %s", e)
@@ -412,10 +426,10 @@ def main(reload_type, query_time, current_time):
 if __name__ == '__main__':
     logger.info("=============================")
     logger.info("FIShBOT Application started")
-    current_time = datetime.now(timezone.utc).isoformat()
-    reload_type, query_time = determine_reload_schedule(months=1)
+    
+    reload_type, query_time = determine_reload_schedule()
 
-    main(reload_type, query_time, current_time)
+    main(reload_type, query_time)
 
     logger.info("Application complete!")
     logger.info("=============================")
