@@ -17,10 +17,10 @@
 
 # python environemnt stuff
 python/env/
-python/data/
+
 *.csv
 *.png
-*.nc
+fishbot*.nc
 *.log*
 *.log
 *.sh
