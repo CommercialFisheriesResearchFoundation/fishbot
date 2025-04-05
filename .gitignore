@@ -18,7 +18,8 @@
 # python environemnt stuff
 python/env/
 
-*.csv
+python/glory*/
+
 *.png
 fishbot*.nc
 *.log*
