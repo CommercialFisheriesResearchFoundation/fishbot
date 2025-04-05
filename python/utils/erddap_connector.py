@@ -50,7 +50,13 @@ class ERDDAPClient:
                 logger.warning("Dataset %s not found on server %s", dataset_id, server)
                 return None
             elif "Name or service not known" in e:
-                logger.warning("Server %s not found", server)
+                logger.warning("Server %s not found when trying to fetch %s", server, dataset_id)
+                return None
+            elif "The proxy server received an invalid response from an upstream server." in e:
+                logger.warning("Server %s not responding when trying to access %s", server, dataset_id)
+                return None
+            elif "Not Found: Currently unknown datasetID" in e:
+                logger.warning("Dataset %s not found on server %s", dataset_id, server)
                 return None
             else: 
                 logger.error("Error retrieving data for %s: %s",dataset_id, e)

@@ -14,7 +14,8 @@ class S3Connector:
         self.aws_region = aws_region
         self.aws_profile = aws_profile
         self.bucket_name = bucket_name
-        session = boto3.Session(profile_name=self.aws_profile)
+        # session = boto3.Session(profile_name=self.aws_profile)
+        session = boto3.Session()
         # increase the max pool connections to 50, default is 10, this speeds up the upload process
         config = Config(max_pool_connections=50)
         self.s3_client = session.client(
@@ -51,7 +52,7 @@ class S3Connector:
             # get the archive key for logging later
             if prefix == 'archive' and any(results):
                 self.archive_s3_key = f"s3://{self.bucket_name}/{results[-1]}"
-                self.archive_url = f"https://{self.bucket_name}.s3.{self.aws_region}amazonaws.com/{results[-1]}"
+                self.archive_url = f"https://{self.bucket_name}.s3.{self.aws_region}.amazonaws.com/{results[-1]}"
             logger.info("All files uploaded successfully")
             return all(results)
         except NoCredentialsError:
@@ -64,7 +65,7 @@ class S3Connector:
 
     def get_archive_key(self) -> str:
         """ Simple method to fetch the S3 archvie key for DB logging"""
-        return self.archive_key
+        return self.archive_s3_key
     def get_archive_url(self) -> str:
         """ Simple method to fetch the public URL for DB logging"""
         return self.archive_url

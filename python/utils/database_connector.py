@@ -91,6 +91,7 @@ class DatabaseConnector:
         except mysql.connector.Error as err:
             logger.error("Error: %s", err)
             raise
+        
     def log_archive(self, archive_dict, table_name):
         """Logs the archive to the database."""
         try:
