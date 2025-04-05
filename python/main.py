@@ -19,7 +19,7 @@ from dateutil.relativedelta import relativedelta
 from scipy.signal import medfilt
 import gc
 
-# Configure some intial logging settings
+# TRADITIONAL DEPLOYMENT LOGGING
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 handler = TimedRotatingFileHandler(
@@ -29,7 +29,7 @@ formatter = logging.Formatter(
 handler.setFormatter(formatter)
 logging.basicConfig(level=logging.INFO, handlers=[handler])
 
-# Pull in the Database credentials from the .env file
+# load the env if local deployment
 load_dotenv()
 DB_USER = os.getenv('DB_USER')
 DB_PASS = os.getenv('DB_PASS')
@@ -39,8 +39,8 @@ DB_TABLE = os.getenv('DB_TABLE')
 DB_ARCHIVE_TABLE = os.getenv('DB_ARCHIVE_TABLE')
 DB_EVENTS_TABLE = os.getenv('DB_EVENTS_TABLE')
 BUCKET_NAME = os.getenv('BUCKET_NAME')
-AWS_REGION = os.getenv('AWS_REGION')
-AWS_PROFILE = os.getenv('AWS_PROFILE')
+AWS_REGION = os.getenv('REGION')
+AWS_PROFILE = os.getenv('PROFILE')
 
 DATASETS = {
     "cfrf": {
@@ -74,16 +74,27 @@ def aggregated_data(df) -> pd.DataFrame:
     df.dropna(subset=['id'], inplace=True)
     df['id'] = df['id'].astype(int)
     df['date'] = df['time'].dt.date
+
     try:
-        df_aggregated = df.groupby(['date', 'centroid']).agg({'temperature': ['mean', 'min', 'max', 'std', 'count'],
-                                                              'dissolved_oxygen': ['mean', 'min', 'max', 'std', 'count'],
-                                                              'salinity': ['mean', 'min', 'max', 'std', 'count'],
-                                                              'data_provider': 'unique',
-                                                              'id': 'first',
-                                                              'geometry': 'first'}).reset_index()
+        agg_columns = {
+            'temperature': ['mean', 'min', 'max', 'std', 'count'],
+            'data_provider': 'unique',
+            'id': 'first',
+            'geometry': 'first'
+        }
+
+        # Check if 'dissolved_oxygen' exists in the dataframe
+        if 'dissolved_oxygen' in df.columns:
+            agg_columns['dissolved_oxygen'] = ['mean', 'min', 'max', 'std', 'count']
+
+        # Check if 'salinity' exists in the dataframe
+        if 'salinity' in df.columns:
+            agg_columns['salinity'] = ['mean', 'min', 'max', 'std', 'count']
+
+        df_aggregated = df.groupby(['date', 'centroid']).agg(agg_columns).reset_index()
     except Exception as e:
         logger.error("Error aggregating data: %s", e)
-        return pd.DataFrame()
+        return None
     df_aggregated.columns = [
         '_'.join(filter(None, col)).strip() if col[1] else col[0]
         for col in df_aggregated.columns.to_flat_index()
@@ -258,6 +269,11 @@ def determine_reload_schedule() -> tuple:
 def main(reload_type, query_time):
     """ main function to call all subroutines"""
 
+    # logger.info("=============================")
+    # logger.info("FIShBOT Application started")
+    
+    # reload_type, query_time = determine_reload_schedule()
+
     current_time = datetime.now(timezone.utc).isoformat()
     logger.info('reload type: %s fetching data after %s',
                 reload_type, query_time)
@@ -329,13 +345,13 @@ def main(reload_type, query_time):
             if combined_df.empty and studyfleet.empty:  # ! remove this check once study fleet are on erddap
                 logger.info('No data to process, exiting...')
                 return
-            logger.info('Concatenated all dataframes into a single dataframe with %s rows and %s columns',
-                        combined_df.shape[0], combined_df.shape[1])
+            logger.info('Concatenated all dataframes into a single dataframe with %s rows and %s columns. Columns: %s',
+                        combined_df.shape[0], combined_df.shape[1], combined_df.columns)
         except Exception as e:
             logger.error("Error concatenating dataframes: %s", e)
-            return
+            raise
     else:
-        logger.warning('No new data to process, exiting...')
+        logger.info('No new data to process, exiting...')
         return
 
     standard_df = sp.gridify_df(combined_df, gdf_grid)
@@ -356,7 +372,7 @@ def main(reload_type, query_time):
             gc.collect()
         except Exception as e:
             logger.error("Error freeing memory data: %s", e)
-            return
+            raise
 
         # * create new DF of just postions for speed
 
@@ -371,7 +387,7 @@ def main(reload_type, query_time):
         agg_df.drop(columns=['geometry'], inplace=True)
     except Exception as e:
         logger.error("Error processing data: %s", e)
-        return
+        raise
     logger.info('Data aggregation and metadata assingment complete.')
     logger.info('-----------------------------------------')
     logger.info('Packing data to NetCDF...')
@@ -381,7 +397,7 @@ def main(reload_type, query_time):
 
     except Exception as e:
         logger.error("Error packing data to NetCDF: %s", e)
-        return
+        raise
     logger.info('NetCDF packing complete!')
     logger.info('created %s nc files', len(files))
     logger.info('-----------------------------------------')
@@ -399,7 +415,8 @@ def main(reload_type, query_time):
         logger.info("Pushing fishbot archive to S3")
         s3.push_to_s3(fishbot_archive, prefix='archive')
         archive_key = s3.get_archive_key()
-        logger.info("Archive key: %s", archive_key)
+        public_url = s3.get_archive_url()
+        logger.info("Archive key: %s", public_url)
         logger.info("Pushed fishbot archive to S3")
         logger.info("Pushing fishbot_realtime to S3")
         s3.push_to_s3(files)
@@ -412,6 +429,7 @@ def main(reload_type, query_time):
             logger.info("Logging archive to DB")
             archive_dict = {
                 "archive_s3_key": archive_key,
+                "archive_public_url": public_url,
                 "archive_date": current_time,
                 "version": __version__,
                 "doi": "",
@@ -419,8 +437,11 @@ def main(reload_type, query_time):
             }
             db.log_archive(archive_dict, DB_ARCHIVE_TABLE)
             logger.info("Archive logged to DB successfully")
+        logger.info("Application complete!")
+        logger.info("=============================")
     except Exception as e:
         logger.error("Error logging archive to DB: %s", e, exc_info=True)
+        raise
 
 
 if __name__ == '__main__':

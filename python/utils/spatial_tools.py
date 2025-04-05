@@ -40,7 +40,7 @@ def get_botgrid() -> gpd.GeoDataFrame:
     standarize the data to a common grid.
     """
     logger.info("Loading grid shapefile")
-    fid = '7km/clipped_NE_grid_7km_reprojected.shp'
+    fid = 'botgrid/clipped_NE_grid_7km_reprojected.shp'
     try:
         gdf_grid = gpd.read_file(fid)
         projected_crs = "EPSG:5070"  # Albers Equal Area Conic
