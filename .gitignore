@@ -19,6 +19,7 @@
 python/env/
 
 python/glory*/
+python/data/local_data/
 
 *.png
 fishbot*.nc
