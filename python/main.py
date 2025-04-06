@@ -1,7 +1,7 @@
 __author__ = 'Linus Stoltz | Data Manager, CFRF'
 __project_team__ = 'Linus Stoltz, Sarah Salois, George Maynard, Mike Morin'
 __doc__ = 'FIShBOT program to aggregate regional data collected by NOAA and CFRF'
-__version__ = '0.3'
+__version__ = '0.4'
 
 import logging
 from logging.handlers import TimedRotatingFileHandler
