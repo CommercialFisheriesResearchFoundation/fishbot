@@ -19,7 +19,8 @@ from dateutil.relativedelta import relativedelta
 from scipy.signal import medfilt
 import gc
 import argparse
-from utils.file_tools import move_files, reload_erddap
+import sys
+from utils.file_tools import move_files, reload_erddap, test_erddap_archive
 
 # TRADITIONAL DEPLOYMENT LOGGING
 logger = logging.getLogger(__name__)
@@ -63,6 +64,17 @@ DATASETS = {
             }
         }
     },
+    # "emolt": {
+    #     "server": "https://erddap.emolt.net/erddap/",
+    #     "dataset_id": ["eMOLT_RT_LOWELL"],
+    #     "protocol": ["tabledap"],
+    #     "response": ["nc"],
+    #     "constraints": {
+    #         "eMOLT_RT": {
+    #             "segment_type=": "Fishing"
+    #         }
+    #     }
+    # },
     "studyfleet": {
         "server": "",
         "dataset_id": [],  # This will be loaded locally from a CSV file
@@ -117,6 +129,7 @@ def aggregated_data(df) -> pd.DataFrame:
 
     df_aggregated['data_provider'] = df_aggregated['data_provider'].astype(
         str).str.replace(r"[\[\]']", "", regex=True)
+    
     return df_aggregated
 
 def standardize_df(df, dataset_id) -> pd.DataFrame:
@@ -132,15 +145,18 @@ def standardize_df(df, dataset_id) -> pd.DataFrame:
                 df.shape[0], df.shape[1])
     if dataset_id == 'eMOLT_RT':
         try:
+            df.to_csv(f'raw_{dataset_id}.csv', index=False)
+            print(f"{dataset_id} pre filter: {len(df)}")
             # eMOLT data just bottom temperature
             df['time'] = pd.to_datetime(df['time'])
             filt = ['time', 'latitude', 'longitude', 'temperature']
 
             df_re = df.groupby('tow_id')[filt].apply(
-                lambda x: x.set_index('time').resample('h').mean()).reset_index()
+                lambda x: x.set_index('time').resample('h').mean().reset_index()).reset_index(drop=True)
             
-            df_re['data_provider'] = 'eMOLT'
-
+            df_re.loc[:,'data_provider'] = 'eMOLT'
+            print(f"{dataset_id} post filter: {len(df_re)}")
+            df_re.to_csv(f'process_test_{dataset_id}.csv', index=False)
             existing_columns = [col for col in keepers if col in df_re.columns]
             return df_re[existing_columns]
         except Exception as e:
@@ -150,31 +166,38 @@ def standardize_df(df, dataset_id) -> pd.DataFrame:
     elif dataset_id == 'eMOLT_RT_LOWELL':
         # Save raw data for debugging
         try:
+            df.to_csv(f'raw_{dataset_id}.csv', index=False)
+            print(f"{dataset_id} pre filter: {len(df)}")
             df['time'] = pd.to_datetime(df['time'])
             df.reset_index(inplace=True)
-            df = df[df['water_detect_perc'] > 60]
-            df = df[df['DO'] > 0]
-            df = df[(df['temperature'] > 0) & (
-                df['temperature'] < 27)]  # gross range test
+            df = df[(df['water_detect_perc'] > 60) & 
+                    (df['DO'] > 0) & 
+                    (df['temperature'].between(0, 27))]
 
             df['flag'] = df.groupby('tow_id')['DO'].transform(
                 lambda x: (x - x.mean()).abs() > 3 * x.std())
-            df = df[df['flag'] == False]
+            df = df.loc[~df['flag']]
+            # print("After outlier removal:", len(df))
             # find short tow_ids
-            df = df[df['tow_id'].astype(str).str.len() >= 10]
+            df = df[df.groupby('tow_id')['tow_id'].transform('count') >= 10]
+            # print("After short tow_id removal:", len(df))
             df['DO_filtered'] = df.groupby('tow_id')['DO'].transform(
                 lambda x: medfilt(x, kernel_size=5))
+            # print("After med filter:", len(df))
             filt = ['time', 'latitude', 'longitude', 'temperature',
-                    'DO_filtered', 'water_detect_perc', 'tow_id']
+                    'DO_filtered']
 
-            df_re = df.groupby('tow_id', group_keys=False)[filt].apply(
-                lambda x: x.set_index('time').resample('h').mean()).reset_index()
+            df_re = df.groupby('tow_id')[filt].apply(
+                lambda x: x.set_index('time').resample('h').mean().reset_index()).reset_index(drop=True)
+            
             df_re.rename(
                 columns={'DO_filtered': 'dissolved_oxygen'}, inplace=True)
             df_re = df_re[df_re['dissolved_oxygen'] > 0]
-            df_re['data_provider'] = 'eMOLT'
+            df_re.loc[:,'data_provider'] = 'eMOLT'
 
             existing_columns = [col for col in keepers if col in df_re.columns]
+            print(f"{dataset_id} post filter: {len(df_re)}")
+            df_re.to_csv(f'process_test_{dataset_id}.csv', index=False)
             return df_re[existing_columns]
         except Exception as e:
             logger.error("error processing %s: %s",
@@ -182,14 +205,18 @@ def standardize_df(df, dataset_id) -> pd.DataFrame:
             return pd.DataFrame(columns=keepers)  # return an empty dataframe if processing fails
     elif dataset_id in ["shelf_fleet_profiles_1m_binned", "wind_farm_profiles_1m_binned"]:
         try:
+            df.to_csv(f'raw_{dataset_id}.csv', index=False)
+            print(f"{dataset_id} pre filter: {len(df)}")
             df = df.loc[df.groupby('profile_id')['sea_pressure'].idxmax()]
             df = df[['conservative_temperature', 'absolute_salinity',
                      'latitude', 'longitude', 'time']]
             df.rename(columns={'conservative_temperature': 'temperature',
                       'absolute_salinity': 'salinity'}, inplace=True)
-            df['data_provider'] = 'CFRF'
+            df.loc[:,'data_provider'] = 'CFRF'
             df['time'] = pd.to_datetime(df['time'])
 
+            df.to_csv(f'process_test_{dataset_id}.csv', index=False)
+            print(f"{dataset_id} post filter: {len(df)}")
             existing_columns = [col for col in keepers if col in df.columns]
             return df[existing_columns]
         except Exception as e:
@@ -198,13 +225,17 @@ def standardize_df(df, dataset_id) -> pd.DataFrame:
 
     elif dataset_id == 'fixed_gear_oceanography':
         try:
+            df.to_csv(f'raw_{dataset_id}.csv', index=False)
+            print(f"{dataset_id} pre filter: {len(df)}")
             df['time'] = pd.to_datetime(df['time'])
             df['time'] = df['time'].dt.tz_localize(None)
             df['flag'] = df.groupby('tow_id')['dissolved_oxygen'].transform(
                 lambda x: (x - x.mean()).abs() > 3 * x.std())
-            df = df[df['flag'] == False]
-            df['data_provider'] = 'CFRF'
+            df = df.loc[~df['flag']]
+            df.loc[:,'data_provider'] = 'CFRF'
+            df.to_csv(f'process_test_{dataset_id}.csv', index=False)
             existing_columns = [col for col in keepers if col in df.columns]
+            print(f"{dataset_id} post filter: {len(df)}")
             return df[existing_columns]
         except Exception as e:
             logger.error("error processing %s: %s", dataset_id, e)
@@ -224,7 +255,7 @@ def load_local_studyfleet(gdf_grid, last_runtime) -> pd.DataFrame:
                            'OBSERVATION_DATE': 'time', 'GRID_ID': 'id', 'TEMP': 'temperature'}, inplace=True)
         study_fleet = study_fleet.merge(
             gdf_grid[['id', 'geometry', 'centroid']], on='id', how='left')
-        study_fleet['data_provider'] = 'StudyFleet'
+        study_fleet.loc[:,'data_provider'] = 'StudyFleet'
         study_fleet = study_fleet[study_fleet['time'] > pd.to_datetime(
             last_runtime).replace(tzinfo=None)]
         if study_fleet.empty:
@@ -241,6 +272,7 @@ def determine_reload_schedule() -> tuple:
     """Determine the reload schedule based on the current date and return query time"""
     try:
         today = datetime.now()
+        today = pd.to_datetime('2025-01-01T00:00:00Z')  # for testing
         # Annual reload
         if today.month == 1 and today.day == 1:
             logger.info("Annual reload scheduled")
@@ -250,17 +282,17 @@ def determine_reload_schedule() -> tuple:
         quarterly_months = [4, 7, 10]
         if today.month in quarterly_months and today.day <= 1:
             logger.info("Quarterly reload scheduled")
-            fetch_threshold = today - relativedelta(years=1)
+            fetch_threshold = (today - relativedelta(years=1)).replace(hour=0, minute=0, second=0, microsecond=0)
             return 'quarterly', fetch_threshold.isoformat()
 
         # Bi-weekly reload
         if today.day in [1, 15]:
             logger.info("Bi-weekly reload scheduled")
-            fetch_threshold = today - relativedelta(months=1)
+            fetch_threshold = (today - relativedelta(months=1)).replace(hour=0, minute=0, second=0, microsecond=0)
             return 'bi-weekly', fetch_threshold.isoformat()
 
         # Daily reload
-        fetch_threshold = today - relativedelta(days=5)
+        fetch_threshold = (today - relativedelta(days=5)).replace(hour=0, minute=0, second=0, microsecond=0)
         logger.info("Daily reload scheduled")
         return 'daily', fetch_threshold.isoformat()
 
@@ -475,6 +507,10 @@ if __name__ == '__main__':
 
     logger.info("=============================")
     logger.info("FIShBOT Application started")
+
+    if not test_erddap_archive():
+        logger.error("ERDDAP archive is not reachable. Exiting...")
+        sys.exit(1)
     
     reload_type, query_time = determine_reload_schedule()
 

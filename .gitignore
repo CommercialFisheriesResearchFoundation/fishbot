@@ -17,6 +17,7 @@
 
 # python environemnt stuff
 python/env/
+python_tools/
 
 python/glory*/
 python/data/local_data/

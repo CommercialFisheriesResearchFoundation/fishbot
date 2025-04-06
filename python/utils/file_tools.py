@@ -2,6 +2,7 @@ import os
 import shutil
 import logging
 import subprocess
+import requests
 logger = logging.getLogger(__name__)
 
 def move_files(file_list, destination_dir) -> None:
@@ -42,3 +43,19 @@ def reload_erddap(erddap_path, dataset_id) -> None:
     except Exception as e:
         logger.error('Could not reload ERDDAP: %s', e, exc_info=True)
         raise e
+    
+def test_erddap_archive() -> bool:
+    server = 'https://erddap.ondeckdata.com/erddap/'
+    dataset_id = 'fishbot_realtime'
+    url = f"{server}tabledap/{dataset_id}.html"
+    try:
+        response = requests.head(url, timeout=10)
+        if response.status_code == 200:
+            logger.info("ERDDAP dataset is reachable: %s", url)
+            return True
+        else:
+            logger.warning("ERDDAP dataset is not reachable. Status code: %d", response.status_code)
+            return False
+    except requests.RequestException as e:
+        logger.error("Error connecting to ERDDAP: %s", e)
+        return False
