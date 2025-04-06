@@ -1,5 +1,6 @@
 import mysql.connector
 import logging
+import pandas as pd
 logger = logging.getLogger(__name__)
 
 
@@ -110,6 +111,22 @@ class DatabaseConnector:
             self.connection.commit()
             cursor.close()
             logger.info("Archive logged successfully.")
+        except mysql.connector.Error as err:
+            logger.error("Error: %s", err)
+            raise
+
+    def update_archive_record(self, table_name)-> dict:
+        """ updates the archive record in the database"""
+        try:
+            cursor = self.connection.cursor()
+            query = f"SELECT version, doi, reload_type, DATE(archive_date) as time, archive_public_url as file_url FROM {table_name} "
+            cursor.execute(query)
+            results = cursor.fetchall()
+            columns = [desc[0] for desc in cursor.description]
+            results = pd.DataFrame(results, columns=columns)
+            cursor.close()
+            logger.info("Archive fetched successfully")
+            return results
         except mysql.connector.Error as err:
             logger.error("Error: %s", err)
             raise

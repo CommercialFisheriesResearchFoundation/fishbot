@@ -1,7 +1,7 @@
 __author__ = 'Linus Stoltz | Data Manager, CFRF'
 __project_team__ = 'Linus Stoltz, Sarah Salois, George Maynard, Mike Morin'
 __doc__ = 'FIShBOT program to aggregate regional data collected by NOAA and CFRF'
-__version__ = '0.2'
+__version__ = '0.3'
 
 import logging
 from logging.handlers import TimedRotatingFileHandler
@@ -18,6 +18,8 @@ from datetime import datetime, timezone
 from dateutil.relativedelta import relativedelta
 from scipy.signal import medfilt
 import gc
+import argparse
+from utils.file_tools import move_files, reload_erddap
 
 # TRADITIONAL DEPLOYMENT LOGGING
 logger = logging.getLogger(__name__)
@@ -41,6 +43,7 @@ DB_EVENTS_TABLE = os.getenv('DB_EVENTS_TABLE')
 BUCKET_NAME = os.getenv('BUCKET_NAME')
 AWS_REGION = os.getenv('REGION')
 AWS_PROFILE = os.getenv('PROFILE')
+ERDDAP_DATA_PATH = os.getenv('ERDDAP_DATA_PATH')
 
 DATASETS = {
     "cfrf": {
@@ -156,7 +159,7 @@ def standardize_df(df, dataset_id) -> pd.DataFrame:
 
             df['flag'] = df.groupby('tow_id')['DO'].transform(
                 lambda x: (x - x.mean()).abs() > 3 * x.std())
-            df = df[df['flag'] is False]
+            df = df[df['flag'] == False]
             # find short tow_ids
             df = df[df['tow_id'].astype(str).str.len() >= 10]
             df['DO_filtered'] = df.groupby('tow_id')['DO'].transform(
@@ -199,7 +202,7 @@ def standardize_df(df, dataset_id) -> pd.DataFrame:
             df['time'] = df['time'].dt.tz_localize(None)
             df['flag'] = df.groupby('tow_id')['dissolved_oxygen'].transform(
                 lambda x: (x - x.mean()).abs() > 3 * x.std())
-            df = df[df['flag'] is False]
+            df = df[df['flag'] == False]
             df['data_provider'] = 'CFRF'
             existing_columns = [col for col in keepers if col in df.columns]
             return df[existing_columns]
@@ -266,7 +269,7 @@ def determine_reload_schedule() -> tuple:
         return None, None
 
 
-def main(reload_type, query_time):
+def main(reload_type, query_time, storage_protocol='s3'):
     """ main function to call all subroutines"""
 
     # logger.info("=============================")
@@ -419,8 +422,14 @@ def main(reload_type, query_time):
         logger.info("Archive key: %s", public_url)
         logger.info("Pushed fishbot archive to S3")
         logger.info("Pushing fishbot_realtime to S3")
-        s3.push_to_s3(files)
-        logger.info("Pushed fishbot_realtime to S3")
+        if storage_protocol == 'local':
+            move_files(files, ERDDAP_DATA_PATH)
+            logger.info("Moved fishbot_realtime to %s", ERDDAP_DATA_PATH)
+            reload_erddap(ERDDAP_DATA_PATH, 'fishbot_realtime')
+            
+        elif storage_protocol == 's3':
+            s3.push_to_s3(files)
+            logger.info("Pushed fishbot_realtime to S3")
     except Exception as e:
         logger.error("Error archiving fishbot: %s", e)
     logger.info('logging the archive in the database')
@@ -437,20 +446,39 @@ def main(reload_type, query_time):
             }
             db.log_archive(archive_dict, DB_ARCHIVE_TABLE)
             logger.info("Archive logged to DB successfully")
-        logger.info("Application complete!")
-        logger.info("=============================")
     except Exception as e:
         logger.error("Error logging archive to DB: %s", e, exc_info=True)
         raise
+    logger.info('-----------------------------------------')
+    if storage_protocol == 'local':
+        logger.info('Updating fishbot_archive dataset in ERDDAP')
+        with DatabaseConnector(DB_HOST, DB_USER, DB_PASS, DB) as db:
+            archive_df = db.update_archive_record(DB_ARCHIVE_TABLE)
+        archive_local = os.path.join(ERDDAP_DATA_PATH, 'archive.csv')
+        archive_df.to_csv(archive_local, index=False)
+        logger.info("Archive data saved to %s", archive_local)
+        # move_files([archive_local], ERDDAP_DATA_PATH)
+        reload_erddap(ERDDAP_DATA_PATH, 'fishbot_archive')
+        logger.info("Fishbot archive dataset updated in ERDDAP")
+        logger.info('-----------------------------------------')
+
+    logger.info("Application complete!")
+    logger.info("=============================")
 
 
 if __name__ == '__main__':
+
+    parser = argparse.ArgumentParser(description="FIShBOT Application")
+    parser.add_argument('-s', '--storage_protocol', type=str, default='s3', choices=['s3', 'local'],
+                        help="Specify the storage protocol to use (default: s3)")
+    args = parser.parse_args()
+
     logger.info("=============================")
     logger.info("FIShBOT Application started")
     
     reload_type, query_time = determine_reload_schedule()
 
-    main(reload_type, query_time)
+    main(reload_type, query_time, storage_protocol=args.storage_protocol)
 
     logger.info("Application complete!")
     logger.info("=============================")
