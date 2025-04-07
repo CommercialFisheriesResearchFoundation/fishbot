@@ -5,31 +5,25 @@ import subprocess
 import requests
 logger = logging.getLogger(__name__)
 
-def move_files(file_list, destination_dir, base_dir) -> None:
+def move_files(file_list, destination_dir) -> None:
     """
-    Moves files from a list to a destination directory while preserving subdirectory structure relative to base_dir.
+    Moves files to a destination directory while preserving their relative path structure.
 
-    :param file_list: List of file paths to move (or a single string path).
-    :param destination_dir: Destination root where files will be moved.
-    :param base_dir: The root directory to preserve structure relative to.
+    :param file_list: List of relative file paths to move.
+    :param destination_dir: Full path to destination directory.
     """
     destination_dir = os.path.join(destination_dir, 'datasets/fishbot')
 
     if isinstance(file_list, str):
         file_list = [file_list]
 
-    logger.info('Moving %s nc files to %s',len(file_list), destination_dir)
+    logger.info('Moving %s files to %s', len(file_list), destination_dir)
 
-    for file_path in file_list:
+    for relative_path in file_list:
+        file_path = os.path.abspath(relative_path)
+
         if not os.path.isfile(file_path):
             logger.warning("Skipping %s: Not a valid file.", file_path)
-            continue
-
-        try:
-            # Compute the relative path from the base directory
-            relative_path = os.path.relpath(file_path, start=base_dir)
-        except ValueError:
-            logger.error("Cannot compute relative path for %s with base_dir %s", file_path, base_dir)
             continue
 
         destination_path = os.path.join(destination_dir, relative_path)
@@ -40,6 +34,7 @@ def move_files(file_list, destination_dir, base_dir) -> None:
         # Remove if already exists, then move
         if os.path.exists(destination_path):
             os.remove(destination_path)
+
         shutil.move(file_path, destination_path)
         logger.debug('Moved %s to %s', file_path, destination_path)
 

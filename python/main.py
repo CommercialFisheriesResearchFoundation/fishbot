@@ -464,6 +464,9 @@ def main(reload_type, query_time, storage_protocol='s3'):
             logger.info("Pushed fishbot_realtime to S3")
     except Exception as e:
         logger.error("Error archiving fishbot: %s", e)
+    finally:
+        logger.info('Deleting local archive file')
+        os.remove(fishbot_archive)
     logger.info('logging the archive in the database')
     try:
         with DatabaseConnector(DB_HOST, DB_USER, DB_PASS, DB) as db:
