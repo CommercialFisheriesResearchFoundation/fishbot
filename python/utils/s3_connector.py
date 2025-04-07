@@ -1,6 +1,7 @@
 import boto3
 from botocore.exceptions import NoCredentialsError, PartialCredentialsError
 import logging
+import os
 from concurrent.futures import ThreadPoolExecutor
 from botocore.config import Config
 logger = logging.getLogger(__name__)
@@ -33,9 +34,10 @@ class S3Connector:
 
             def upload_file(file_path):
                 try:
-                    s3_key = f"{prefix}/{file_path}".lstrip("/")
+                    s3_key = f"{prefix}/{file_path}".lstrip("/") # preserves file strucuture for working files
                     extra_args = {}
                     if prefix == 'archive':
+                        s3_key = f"{prefix}/{os.path.basename(file_path)}".lstrip("/")
                         extra_args['StorageClass'] = 'STANDARD_IA'
                     self.s3_client.upload_file(
                         file_path, self.bucket_name, s3_key, ExtraArgs=extra_args)

@@ -73,7 +73,7 @@ class ERDDAPClient:
         return results
     
     
-    def archive_fishbot(self,current_time, version)-> xr.Dataset:
+    def archive_fishbot(self,current_time, version, storage_protocol='local')-> xr.Dataset:
         server = 'https://erddap.ondeckdata.com/erddap/'
         try:
             e = ERDDAP(
@@ -86,7 +86,10 @@ class ERDDAPClient:
             ds = e.to_xarray()
             ds.attrs['version'] = version
             ds.attrs['archive_time'] = current_time
-            file_name = f"fishbot_archive_{str(current_time).split('T')[0]}.nc"
+            if storage_protocol == 'local':
+                file_name = f"fishbot_archive_{str(current_time).split('T')[0]}.nc"
+            elif storage_protocol =='s3':
+                file_name = f"/tmp/fishbot_archive_{str(current_time).split('T')[0]}.nc"
             ds.to_netcdf(file_name)
         except Exception as e:
             logger.error("Error could not fetch fishbot data for archive. Exiting program: %s", e)

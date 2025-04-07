@@ -1,10 +1,10 @@
 __author__ = 'Linus Stoltz | Data Manager, CFRF'
 __project_team__ = 'Linus Stoltz, Sarah Salois, George Maynard, Mike Morin'
 __doc__ = 'FIShBOT program to aggregate regional data collected by NOAA and CFRF'
-__version__ = '0.4'
+__version__ = '0.5'
 
 import logging
-from logging.handlers import TimedRotatingFileHandler
+# from logging.handlers import TimedRotatingFileHandler
 from utils.erddap_connector import ERDDAPClient
 from utils.database_connector import DatabaseConnector
 import utils.spatial_tools as sp
@@ -12,7 +12,7 @@ from utils.netcdf_packing import pack_to_netcdf
 from utils.s3_connector import S3Connector
 import asyncio
 import pandas as pd
-from dotenv import load_dotenv
+# from dotenv import load_dotenv
 import os
 from datetime import datetime, timezone
 from dateutil.relativedelta import relativedelta
@@ -25,15 +25,15 @@ from utils.file_tools import move_files, reload_erddap, test_erddap_archive
 # TRADITIONAL DEPLOYMENT LOGGING
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
-handler = TimedRotatingFileHandler(
-    'fishbot.log', when='midnight', interval=1, backupCount=7)
-formatter = logging.Formatter(
-    '%(asctime)s - %(name)s - %(levelname)s - %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
-handler.setFormatter(formatter)
-logging.basicConfig(level=logging.INFO, handlers=[handler])
+# handler = TimedRotatingFileHandler(
+#     'fishbot.log', when='midnight', interval=1, backupCount=7)
+# formatter = logging.Formatter(
+#     '%(asctime)s - %(name)s - %(levelname)s - %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
+# handler.setFormatter(formatter)
+# logging.basicConfig(level=logging.INFO, handlers=[handler])
 
 # load the env if local deployment
-load_dotenv()
+# load_dotenv()
 DB_USER = os.getenv('DB_USER')
 DB_PASS = os.getenv('DB_PASS')
 DB_HOST = os.getenv('DB_HOST')
@@ -57,24 +57,13 @@ DATASETS = {
         "server": "https://erddap.emolt.net/erddap/",
         "dataset_id": ["eMOLT_RT", "eMOLT_RT_LOWELL"],
         "protocol": ["tabledap", "tabledap"],
-        "response": ["csv", "nc"],
+        "response": ["nc", "nc"],
         "constraints": {
             "eMOLT_RT": {
                 "segment_type=": "Fishing"
             }
         }
     },
-    # "emolt": {
-    #     "server": "https://erddap.emolt.net/erddap/",
-    #     "dataset_id": ["eMOLT_RT_LOWELL"],
-    #     "protocol": ["tabledap"],
-    #     "response": ["nc"],
-    #     "constraints": {
-    #         "eMOLT_RT": {
-    #             "segment_type=": "Fishing"
-    #         }
-    #     }
-    # },
     "studyfleet": {
         "server": "",
         "dataset_id": [],  # This will be loaded locally from a CSV file
@@ -145,8 +134,6 @@ def standardize_df(df, dataset_id) -> pd.DataFrame:
                 df.shape[0], df.shape[1])
     if dataset_id == 'eMOLT_RT':
         try:
-            df.to_csv(f'raw_{dataset_id}.csv', index=False)
-            # print(f"{dataset_id} pre filter: {len(df)}")
             # eMOLT data just bottom temperature
             df['time'] = pd.to_datetime(df['time'])
             filt = ['time', 'latitude', 'longitude', 'temperature']
@@ -155,8 +142,6 @@ def standardize_df(df, dataset_id) -> pd.DataFrame:
                 lambda x: x.set_index('time').resample('h').mean().reset_index()).reset_index(drop=True)
             
             df_re.loc[:,'data_provider'] = 'eMOLT'
-            # print(f"{dataset_id} post filter: {len(df_re)}")
-            df_re.to_csv(f'process_test_{dataset_id}.csv', index=False)
             existing_columns = [col for col in keepers if col in df_re.columns]
             return df_re[existing_columns]
         except Exception as e:
@@ -164,10 +149,7 @@ def standardize_df(df, dataset_id) -> pd.DataFrame:
             return pd.DataFrame(columns=keepers)  # return an empty dataframe if processing fails
 
     elif dataset_id == 'eMOLT_RT_LOWELL':
-        # Save raw data for debugging
         try:
-            df.to_csv(f'raw_{dataset_id}.csv', index=False)
-            # print(f"{dataset_id} pre filter: {len(df)}")
             df['time'] = pd.to_datetime(df['time'])
             df.reset_index(inplace=True)
             df = df[(df['water_detect_perc'] > 60) & 
@@ -177,13 +159,12 @@ def standardize_df(df, dataset_id) -> pd.DataFrame:
             df['flag'] = df.groupby('tow_id')['DO'].transform(
                 lambda x: (x - x.mean()).abs() > 3 * x.std())
             df = df.loc[~df['flag']]
-            # # print("After outlier removal:", len(df))
             # find short tow_ids
             df = df[df.groupby('tow_id')['tow_id'].transform('count') >= 10]
-            # # print("After short tow_id removal:", len(df))
+
             df['DO_filtered'] = df.groupby('tow_id')['DO'].transform(
                 lambda x: medfilt(x, kernel_size=5))
-            # # print("After med filter:", len(df))
+
             filt = ['time', 'latitude', 'longitude', 'temperature',
                     'DO_filtered']
 
@@ -196,8 +177,6 @@ def standardize_df(df, dataset_id) -> pd.DataFrame:
             df_re.loc[:,'data_provider'] = 'eMOLT'
 
             existing_columns = [col for col in keepers if col in df_re.columns]
-            # print(f"{dataset_id} post filter: {len(df_re)}")
-            df_re.to_csv(f'process_test_{dataset_id}.csv', index=False)
             return df_re[existing_columns]
         except Exception as e:
             logger.error("error processing %s: %s",
@@ -205,8 +184,6 @@ def standardize_df(df, dataset_id) -> pd.DataFrame:
             return pd.DataFrame(columns=keepers)  # return an empty dataframe if processing fails
     elif dataset_id in ["shelf_fleet_profiles_1m_binned", "wind_farm_profiles_1m_binned"]:
         try:
-            df.to_csv(f'raw_{dataset_id}.csv', index=False)
-            # print(f"{dataset_id} pre filter: {len(df)}")
             df = df.loc[df.groupby('profile_id')['sea_pressure'].idxmax()]
             df = df[['conservative_temperature', 'absolute_salinity',
                      'latitude', 'longitude', 'time']]
@@ -215,8 +192,6 @@ def standardize_df(df, dataset_id) -> pd.DataFrame:
             df.loc[:,'data_provider'] = 'CFRF'
             df['time'] = pd.to_datetime(df['time'])
 
-            df.to_csv(f'process_test_{dataset_id}.csv', index=False)
-            # print(f"{dataset_id} post filter: {len(df)}")
             existing_columns = [col for col in keepers if col in df.columns]
             return df[existing_columns]
         except Exception as e:
@@ -225,17 +200,15 @@ def standardize_df(df, dataset_id) -> pd.DataFrame:
 
     elif dataset_id == 'fixed_gear_oceanography':
         try:
-            df.to_csv(f'raw_{dataset_id}.csv', index=False)
-            # print(f"{dataset_id} pre filter: {len(df)}")
+
             df['time'] = pd.to_datetime(df['time'])
             df['time'] = df['time'].dt.tz_localize(None)
             df['flag'] = df.groupby('tow_id')['dissolved_oxygen'].transform(
                 lambda x: (x - x.mean()).abs() > 3 * x.std())
             df = df.loc[~df['flag']]
             df.loc[:,'data_provider'] = 'CFRF'
-            df.to_csv(f'process_test_{dataset_id}.csv', index=False)
+
             existing_columns = [col for col in keepers if col in df.columns]
-            # print(f"{dataset_id} post filter: {len(df)}")
             return df[existing_columns]
         except Exception as e:
             logger.error("error processing %s: %s", dataset_id, e)
@@ -301,13 +274,13 @@ def determine_reload_schedule() -> tuple:
         return None, None
 
 
-def main(reload_type, query_time, storage_protocol='s3'):
+def lambda_handler(event, context):
     """ main function to call all subroutines"""
-
-    # logger.info("=============================")
-    # logger.info("FIShBOT Application started")
+    storage_protocol = 's3'
+    logger.info("=============================")
+    logger.info("FIShBOT Application started")
     
-    # reload_type, query_time = determine_reload_schedule()
+    reload_type, query_time = determine_reload_schedule()
 
     current_time = datetime.now(timezone.utc).isoformat()
     logger.info('reload type: %s fetching data after %s',
@@ -382,9 +355,9 @@ def main(reload_type, query_time, storage_protocol='s3'):
                 return
             logger.info('Concatenated all dataframes into a single dataframe with %s rows and %s columns. Columns: %s',
                         combined_df.shape[0], combined_df.shape[1], combined_df.columns)
-        except Exception as e:
-            logger.error("Error concatenating dataframes: %s", e)
-            raise
+        except ValueError as e:
+            logger.info('%s : exiting ...',e)
+            return
     else:
         logger.info('No new data to process, exiting...')
         return
@@ -426,9 +399,10 @@ def main(reload_type, query_time, storage_protocol='s3'):
     logger.info('Data aggregation and metadata assingment complete.')
     logger.info('-----------------------------------------')
     logger.info('Packing data to NetCDF...')
+    s3 = S3Connector(BUCKET_NAME, AWS_REGION, AWS_PROFILE)
     try:
         files = pack_to_netcdf(
-            agg_df, output_path='/home/ubuntu/cfrf-erddap/datasets/fishbot', version=__version__) # set this to the local path
+            agg_df, output_path='/tmp', version=__version__) # set this to the local path
 
     except Exception as e:
         logger.error("Error packing data to NetCDF: %s", e)
@@ -439,14 +413,14 @@ def main(reload_type, query_time, storage_protocol='s3'):
     logger.info('Archiving fishbot_realtime')
     try:
         fishbot_archive = dat.archive_fishbot(
-            current_time, version=__version__)
-
+            current_time, version=__version__, storage_protocol=storage_protocol)
+        archvie_file_size = os.path.getsize(fishbot_archive) / (1024 * 1024)  # Convert bytes to MB
         logger.info('Fishbot archive created successfully!')
         logger.info('-----------------------------------------')
     except Exception as e:
         logger.error("Error archiving fishbot: %s", e)
+        raise
     try:
-        s3 = S3Connector(BUCKET_NAME, AWS_REGION, AWS_PROFILE)
         logger.info("Pushing fishbot archive to S3")
         s3.push_to_s3(fishbot_archive, prefix='archive')
         archive_key = s3.get_archive_key()
@@ -454,6 +428,7 @@ def main(reload_type, query_time, storage_protocol='s3'):
         logger.info("Archive key: %s", public_url)
         logger.info("Pushed fishbot archive to S3")
         logger.info("Pushing fishbot_realtime to S3")
+
         if storage_protocol == 'local':
             move_files(files, ERDDAP_DATA_PATH)
             logger.info("Moved fishbot_realtime to %s", ERDDAP_DATA_PATH)
@@ -464,6 +439,7 @@ def main(reload_type, query_time, storage_protocol='s3'):
             logger.info("Pushed fishbot_realtime to S3")
     except Exception as e:
         logger.error("Error archiving fishbot: %s", e)
+        raise
     finally:
         logger.info('Deleting local archive file')
         os.remove(fishbot_archive)
@@ -477,7 +453,8 @@ def main(reload_type, query_time, storage_protocol='s3'):
                 "archive_date": current_time,
                 "version": __version__,
                 "doi": "",
-                "reload_type": reload_type
+                "reload_type": reload_type,
+                "file_size_mb": archvie_file_size
             }
             db.log_archive(archive_dict, DB_ARCHIVE_TABLE)
             logger.info("Archive logged to DB successfully")
@@ -496,28 +473,37 @@ def main(reload_type, query_time, storage_protocol='s3'):
         reload_erddap(ERDDAP_DATA_PATH, 'fishbot_archive')
         logger.info("Fishbot archive dataset updated in ERDDAP")
         logger.info('-----------------------------------------')
+    elif storage_protocol == 's3':
+        logger.info('Updating fishbot_archive dataset in S3')
+        with DatabaseConnector(DB_HOST, DB_USER, DB_PASS, DB) as db:
+            archive_df = db.update_archive_record(DB_ARCHIVE_TABLE)
+        archive_file = '/tmp/fishbot_archive.csv'
+        archive_df.to_csv(archive_file, index=False)
+        s3.push_to_s3(archive_file)
+        logger.info("Archive dataset %s pushed to S3", archive_file)
+
 
     logger.info("Application complete!")
     logger.info("=============================")
 
 
-if __name__ == '__main__':
+# if __name__ == '__main__':
 
-    parser = argparse.ArgumentParser(description="FIShBOT Application")
-    parser.add_argument('-s', '--storage_protocol', type=str, default='s3', choices=['s3', 'local'],
-                        help="Specify the storage protocol to use (default: s3)")
-    args = parser.parse_args()
+#     parser = argparse.ArgumentParser(description="FIShBOT Application")
+#     parser.add_argument('-s', '--storage_protocol', type=str, default='s3', choices=['s3', 'local'],
+#                         help="Specify the storage protocol to use (default: s3)")
+#     args = parser.parse_args()
 
-    logger.info("=============================")
-    logger.info("FIShBOT Application started")
+#     logger.info("=============================")
+#     logger.info("FIShBOT Application started")
 
-    if not test_erddap_archive():
-        logger.error("ERDDAP archive is not reachable. Exiting...")
-        sys.exit(1)
+#     if not test_erddap_archive():
+#         logger.error("ERDDAP archive is not reachable. Exiting...")
+#         sys.exit(1)
     
-    reload_type, query_time = determine_reload_schedule()
+#     reload_type, query_time = determine_reload_schedule()
 
-    main(reload_type, query_time, storage_protocol=args.storage_protocol)
+#     main(reload_type, query_time, storage_protocol=args.storage_protocol)
 
-    logger.info("Application complete!")
-    logger.info("=============================")
+#     logger.info("Application complete!")
+#     logger.info("=============================")

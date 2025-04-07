@@ -3,6 +3,7 @@ import xarray as xr
 import pandas as pd
 from datetime import datetime, timedelta
 import logging
+from utils.s3_connector import S3Connector
 logger = logging.getLogger(__name__)
 
 
@@ -127,8 +128,9 @@ def set_variable_attrs(var_name) -> dict:
     }
     return attrs.get(var_name, {})
 
-def pack_to_netcdf(df_out, output_path="data/nc_out_full", version="0.1") -> list:
+def pack_to_netcdf(df_out, output_path="data_out", version="0.1") -> list:
     """Tool to create daily nc files for output of the entire grid. Function also returns a list of all created file names for pushing to S3."""
+    
     try:
         df_out['time'] = pd.to_datetime(df_out['time'])
         epoch = datetime(1970, 1, 1)
@@ -211,11 +213,32 @@ def pack_to_netcdf(df_out, output_path="data/nc_out_full", version="0.1") -> lis
             # Output path setup
             date = datetime(1970, 1, 1) + timedelta(days=day)
             year, month = date.year, date.month
-            directory = f"{output_path}/{year}/{month}"
-            os.makedirs(directory, exist_ok=True)
-            filename = f"{directory}/fishbot_{day}.nc"
-            ds.to_netcdf(filename)
-            filenames.append(filename)
+
+            if isinstance(output_path, S3Connector):
+                # S3 upload
+                directory = f"/tmp/{year}/{month}"
+                os.makedirs(directory, exist_ok=True)
+                filename = f"{directory}/fishbot_{day}.nc"
+                ds.to_netcdf(filename)
+
+                # s3_key = f"{year}/{month}/fishbot_{day}.nc"
+                try:
+                    output_path.push_to_s3(filename)
+  
+                except Exception as e:
+                    logger.error("Failed to upload %s to S3: %s", filename, e)
+                    raise
+
+                finally:
+                    # Delete the local file
+                    os.remove(filename)
+                
+            else:
+                directory = f"{output_path}/{year}/{month}"
+                os.makedirs(directory, exist_ok=True)
+                filename = f"{directory}/fishbot_{day}.nc"
+                ds.to_netcdf(filename)
+                filenames.append(filename)
 
         return filenames
     except Exception as e:
