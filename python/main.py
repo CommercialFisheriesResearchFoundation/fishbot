@@ -146,7 +146,7 @@ def standardize_df(df, dataset_id) -> pd.DataFrame:
     if dataset_id == 'eMOLT_RT':
         try:
             df.to_csv(f'raw_{dataset_id}.csv', index=False)
-            print(f"{dataset_id} pre filter: {len(df)}")
+            # print(f"{dataset_id} pre filter: {len(df)}")
             # eMOLT data just bottom temperature
             df['time'] = pd.to_datetime(df['time'])
             filt = ['time', 'latitude', 'longitude', 'temperature']
@@ -155,7 +155,7 @@ def standardize_df(df, dataset_id) -> pd.DataFrame:
                 lambda x: x.set_index('time').resample('h').mean().reset_index()).reset_index(drop=True)
             
             df_re.loc[:,'data_provider'] = 'eMOLT'
-            print(f"{dataset_id} post filter: {len(df_re)}")
+            # print(f"{dataset_id} post filter: {len(df_re)}")
             df_re.to_csv(f'process_test_{dataset_id}.csv', index=False)
             existing_columns = [col for col in keepers if col in df_re.columns]
             return df_re[existing_columns]
@@ -167,7 +167,7 @@ def standardize_df(df, dataset_id) -> pd.DataFrame:
         # Save raw data for debugging
         try:
             df.to_csv(f'raw_{dataset_id}.csv', index=False)
-            print(f"{dataset_id} pre filter: {len(df)}")
+            # print(f"{dataset_id} pre filter: {len(df)}")
             df['time'] = pd.to_datetime(df['time'])
             df.reset_index(inplace=True)
             df = df[(df['water_detect_perc'] > 60) & 
@@ -177,13 +177,13 @@ def standardize_df(df, dataset_id) -> pd.DataFrame:
             df['flag'] = df.groupby('tow_id')['DO'].transform(
                 lambda x: (x - x.mean()).abs() > 3 * x.std())
             df = df.loc[~df['flag']]
-            # print("After outlier removal:", len(df))
+            # # print("After outlier removal:", len(df))
             # find short tow_ids
             df = df[df.groupby('tow_id')['tow_id'].transform('count') >= 10]
-            # print("After short tow_id removal:", len(df))
+            # # print("After short tow_id removal:", len(df))
             df['DO_filtered'] = df.groupby('tow_id')['DO'].transform(
                 lambda x: medfilt(x, kernel_size=5))
-            # print("After med filter:", len(df))
+            # # print("After med filter:", len(df))
             filt = ['time', 'latitude', 'longitude', 'temperature',
                     'DO_filtered']
 
@@ -196,7 +196,7 @@ def standardize_df(df, dataset_id) -> pd.DataFrame:
             df_re.loc[:,'data_provider'] = 'eMOLT'
 
             existing_columns = [col for col in keepers if col in df_re.columns]
-            print(f"{dataset_id} post filter: {len(df_re)}")
+            # print(f"{dataset_id} post filter: {len(df_re)}")
             df_re.to_csv(f'process_test_{dataset_id}.csv', index=False)
             return df_re[existing_columns]
         except Exception as e:
@@ -206,7 +206,7 @@ def standardize_df(df, dataset_id) -> pd.DataFrame:
     elif dataset_id in ["shelf_fleet_profiles_1m_binned", "wind_farm_profiles_1m_binned"]:
         try:
             df.to_csv(f'raw_{dataset_id}.csv', index=False)
-            print(f"{dataset_id} pre filter: {len(df)}")
+            # print(f"{dataset_id} pre filter: {len(df)}")
             df = df.loc[df.groupby('profile_id')['sea_pressure'].idxmax()]
             df = df[['conservative_temperature', 'absolute_salinity',
                      'latitude', 'longitude', 'time']]
@@ -216,7 +216,7 @@ def standardize_df(df, dataset_id) -> pd.DataFrame:
             df['time'] = pd.to_datetime(df['time'])
 
             df.to_csv(f'process_test_{dataset_id}.csv', index=False)
-            print(f"{dataset_id} post filter: {len(df)}")
+            # print(f"{dataset_id} post filter: {len(df)}")
             existing_columns = [col for col in keepers if col in df.columns]
             return df[existing_columns]
         except Exception as e:
@@ -226,7 +226,7 @@ def standardize_df(df, dataset_id) -> pd.DataFrame:
     elif dataset_id == 'fixed_gear_oceanography':
         try:
             df.to_csv(f'raw_{dataset_id}.csv', index=False)
-            print(f"{dataset_id} pre filter: {len(df)}")
+            # print(f"{dataset_id} pre filter: {len(df)}")
             df['time'] = pd.to_datetime(df['time'])
             df['time'] = df['time'].dt.tz_localize(None)
             df['flag'] = df.groupby('tow_id')['dissolved_oxygen'].transform(
@@ -235,7 +235,7 @@ def standardize_df(df, dataset_id) -> pd.DataFrame:
             df.loc[:,'data_provider'] = 'CFRF'
             df.to_csv(f'process_test_{dataset_id}.csv', index=False)
             existing_columns = [col for col in keepers if col in df.columns]
-            print(f"{dataset_id} post filter: {len(df)}")
+            # print(f"{dataset_id} post filter: {len(df)}")
             return df[existing_columns]
         except Exception as e:
             logger.error("error processing %s: %s", dataset_id, e)
