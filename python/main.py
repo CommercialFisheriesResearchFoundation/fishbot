@@ -486,7 +486,7 @@ def main(reload_type, query_time, storage_protocol='s3'):
         logger.info('Updating fishbot_archive dataset in ERDDAP')
         with DatabaseConnector(DB_HOST, DB_USER, DB_PASS, DB) as db:
             archive_df = db.update_archive_record(DB_ARCHIVE_TABLE)
-        archive_local = os.path.join(ERDDAP_DATA_PATH, 'archive.csv')
+        archive_local = os.path.join(ERDDAP_DATA_PATH, 'datasets/fishbot/fishbot_archive.csv')
         archive_df.to_csv(archive_local, index=False)
         logger.info("Archive data saved to %s", archive_local)
         # move_files([archive_local], ERDDAP_DATA_PATH)
