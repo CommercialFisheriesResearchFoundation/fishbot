@@ -17,6 +17,7 @@
 
 # python environemnt stuff
 python/env/
+python/utils/__pycache__/
 python_tools/
 
 python/glory*/
