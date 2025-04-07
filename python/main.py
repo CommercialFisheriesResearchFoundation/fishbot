@@ -272,7 +272,7 @@ def determine_reload_schedule() -> tuple:
     """Determine the reload schedule based on the current date and return query time"""
     try:
         today = datetime.now()
-        today = pd.to_datetime('2025-01-01T00:00:00Z')  # for testing
+        # today = pd.to_datetime('2025-01-01T00:00:00Z')  # for testing
         # Annual reload
         if today.month == 1 and today.day == 1:
             logger.info("Annual reload scheduled")
