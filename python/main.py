@@ -428,7 +428,7 @@ def main(reload_type, query_time, storage_protocol='s3'):
     logger.info('Packing data to NetCDF...')
     try:
         files = pack_to_netcdf(
-            agg_df, output_path='erddap', version=__version__)
+            agg_df, output_path='/home/ubuntu/cfrf-erddap/datasets/fishbot', version=__version__) # set this to the local path
 
     except Exception as e:
         logger.error("Error packing data to NetCDF: %s", e)
