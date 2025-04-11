@@ -9,7 +9,7 @@ logger = logging.getLogger(__name__)
 
 def gridify_df(df, gdf_grid=None) -> gpd.GeoDataFrame:
     """Takes the standardized df and assigns grid values, returning a GeoDataFrame"""
-
+    logger.info("Gridifying the data")
     if not isinstance(gdf_grid, gpd.GeoDataFrame):
         gdf_grid = get_botgrid()
 

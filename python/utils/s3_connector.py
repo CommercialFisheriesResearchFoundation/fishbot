@@ -2,7 +2,8 @@ import boto3
 from botocore.exceptions import NoCredentialsError, PartialCredentialsError
 import logging
 import os
-from concurrent.futures import ThreadPoolExecutor
+import xarray as xr
+import tempfile
 from botocore.config import Config
 logger = logging.getLogger(__name__)
 
@@ -10,12 +11,12 @@ logger = logging.getLogger(__name__)
 class S3Connector:
     """ Class to handle S3 connections and uploads"""
 
-    def __init__(self, bucket_name, aws_region, aws_profile):
+    def __init__(self, bucket_name, aws_region,aws_profile):
         logger.info('Initializing S3 client with IAM role')
         self.aws_region = aws_region
         self.aws_profile = aws_profile
         self.bucket_name = bucket_name
-        # session = boto3.Session(profile_name=self.aws_profile)
+        # session = boto3.Session(profile_name=self.aws_profile) #! ReMOVE AFTER TESTING
         session = boto3.Session()
         # increase the max pool connections to 50, default is 10, this speeds up the upload process
         config = Config(max_pool_connections=50)
@@ -24,46 +25,52 @@ class S3Connector:
 
         self.archive_key = None
         self.archive_url = None
+        self.archive_s3_key = None
 
-    def push_to_s3(self, files, prefix="") -> bool:
-        """ Method to push files to S3. Uses ThreadPoolExecutor to upload files in parallel"""
+    def push_file_to_s3(self, file, s3_key, content_type="application/octet-stream") -> str:
+        """ Method to push a file object to S3 """
         try:
-            # Ensure files is a list
-            if not isinstance(files, list):
-                files = [files]
-
-            def upload_file(file_path):
-                try:
-                    s3_key = f"{prefix}/{file_path}".lstrip("/") # preserves file strucuture for working files
-                    extra_args = {}
-                    if prefix == 'archive':
-                        s3_key = f"{prefix}/{os.path.basename(file_path)}".lstrip("/")
-                        extra_args['StorageClass'] = 'STANDARD_IA'
-                    self.s3_client.upload_file(
-                        file_path, self.bucket_name, s3_key, ExtraArgs=extra_args)
-                    logger.debug("File %s uploaded to %s/%s",
-                                 file_path, self.bucket_name, s3_key)
-                    return s3_key
-                except Exception as e:
-                    logger.error("Failed to upload %s: %s", file_path, e)
-                    return None
-
-            with ThreadPoolExecutor() as executor:
-                results = list(executor.map(upload_file, files))
-
-            # get the archive key for logging later
-            if prefix == 'archive' and any(results):
-                self.archive_s3_key = f"s3://{self.bucket_name}/{results[-1]}"
-                self.archive_url = f"https://{self.bucket_name}.s3.{self.aws_region}.amazonaws.com/{results[-1]}"
-            logger.info("All files uploaded successfully")
-            return all(results)
-        except NoCredentialsError:
-            logger.error("Error: AWS credentials not available.")
-        except PartialCredentialsError:
-            logger.error("Error: Incomplete AWS credentials provided.")
+            extra_args = {'ContentType': content_type}
+            logger.info("Uploading file to s3://%s/%s", self.bucket_name, s3_key)
+            self.s3_client.upload_fileobj(file, self.bucket_name, s3_key, ExtraArgs=extra_args)
+            logger.debug("file uploaded to s3://%s/%s", self.bucket_name, s3_key)
+            return f"s3://{self.bucket_name}/{s3_key}"
+        except (NoCredentialsError, PartialCredentialsError) as cred_error:
+            logger.error("AWS credentials error: %s", cred_error)
+            raise
         except Exception as e:
-            logger.error("An error occurred: %s", e)
-        return False
+            logger.error("Failed to upload file: %s", e)
+            raise
+
+    def archive_fishbot(self,ds, current_time, version, prefix='archive')-> float:
+        # server = 'https://erddap.ondeckdata.com/erddap/'
+        if not isinstance(ds, xr.Dataset):
+            raise TypeError(f"Expected ds to be xarray Dataset, got {type(ds).__name__}")
+        if not isinstance(prefix, str):
+            raise TypeError(f"Expected 'prefix' to be str, got {type(prefix).__name__}")
+        if not isinstance(version, str):
+            raise TypeError(f"Expected 'version' to be str, got {type(version).__name__}")
+        
+        ds.attrs['version'] = version
+        ds.attrs['archive_time'] = current_time
+
+        try:
+            with tempfile.NamedTemporaryFile(suffix=".nc", dir="/tmp", delete=False) as tmp:
+                ds.to_netcdf(tmp.name, mode="w", engine="scipy")
+                archvie_file_size = round(os.path.getsize(tmp.name) / (1024 * 1024), 1)  # Convert bytes to MB
+
+            with open(tmp.name, 'rb') as f:
+                s3_key = f"{prefix}/{str(current_time).split('T')[0]}.nc"
+                self.push_file_to_s3(f, s3_key, content_type="application/netcdf")
+               
+        except Exception as e:
+            logger.error("Failed to upload to S3: %s", e)
+            raise
+
+        self.archive_s3_key = f"s3://{self.bucket_name}/{s3_key}"
+        self.archive_url = f"https://{self.bucket_name}.s3.{self.aws_region}.amazonaws.com/{s3_key}"
+        return archvie_file_size
+
 
     def get_archive_key(self) -> str:
         """ Simple method to fetch the S3 archvie key for DB logging"""
