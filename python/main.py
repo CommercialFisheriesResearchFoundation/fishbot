@@ -4,6 +4,10 @@ __doc__ = 'FIShBOT program to aggregate regional data into a standarzied daily g
 __version__ = '0.6'
 
 import logging
+import sys
+# Configure logging before any other imports
+logger = logging.getLogger()
+logger.setLevel(logging.INFO)
 from utils.erddap_connector import ERDDAPClient
 from utils.database_connector import DatabaseConnector
 import utils.spatial_tools as sp
@@ -17,15 +21,6 @@ from datetime import datetime, timezone
 from dateutil.relativedelta import relativedelta
 from scipy.signal import medfilt
 import gc
-import sys
-
-# TRADITIONAL DEPLOYMENT LOGGING
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-    stream=sys.stdout
-)
-logger = logging.getLogger(__name__)
 
 DB_USER = os.getenv('DB_USER')
 DB_PASS = os.getenv('DB_PASS')
@@ -36,8 +31,9 @@ DB_ARCHIVE_TABLE = os.getenv('DB_ARCHIVE_TABLE')
 DB_EVENTS_TABLE = os.getenv('DB_EVENTS_TABLE')
 BUCKET_NAME = os.getenv('BUCKET_NAME')
 AWS_REGION = os.getenv('REGION')
-AWS_PROFILE = os.getenv('PROFILE')
-ERDDAP_DATA_PATH = os.getenv('ERDDAP_DATA_PATH')
+S3_PREFIX = os.getenv('PREFIX')
+S3_ARCHIVE_PREFIX = os.getenv('ARCHIVE_PREFIX')
+FULL_RELOAD_FLAG = os.getenv('FULL_RELOAD_FLAG', 'False').lower() == 'true'
 
 DATASETS = {
     "cfrf": {
@@ -322,9 +318,12 @@ def load_local_studyfleet(gdf_grid, last_runtime) -> pd.DataFrame:
 
 def determine_reload_schedule() -> tuple:
     """Determine the reload schedule based on the current date and return query time"""
+    if FULL_RELOAD_FLAG:
+        logger.info("Full reload flag is set. Reloading all data.")
+        return 'manual_full', '2000-01-01T00:00:00Z'
     try:
         today = datetime.now()
-        today = pd.to_datetime('2025-01-01T00:00:00Z')  # for testing
+        # today = pd.to_datetime('2025-01-01T00:00:00Z')  # for testing
         # Annual reload
         if today.month == 1 and today.day == 1:
             logger.info("Annual reload scheduled")
@@ -335,25 +334,26 @@ def determine_reload_schedule() -> tuple:
         if today.month in quarterly_months and today.day <= 1:
             logger.info("Quarterly reload scheduled")
             fetch_threshold = (today - relativedelta(years=1)
-                               ).replace(hour=0, minute=0, second=0, microsecond=0)
+                            ).replace(hour=0, minute=0, second=0, microsecond=0)
             return 'quarterly', fetch_threshold.isoformat()
 
         # Bi-weekly reload
         if today.day in [1, 15]:
             logger.info("Bi-weekly reload scheduled")
             fetch_threshold = (today - relativedelta(months=1)
-                               ).replace(hour=0, minute=0, second=0, microsecond=0)
+                            ).replace(hour=0, minute=0, second=0, microsecond=0)
             return 'bi-weekly', fetch_threshold.isoformat()
 
         # Daily reload
         fetch_threshold = (today - relativedelta(days=5)
-                           ).replace(hour=0, minute=0, second=0, microsecond=0)
+                        ).replace(hour=0, minute=0, second=0, microsecond=0)
         logger.info("Daily reload scheduled")
         return 'daily', fetch_threshold.isoformat()
 
     except Exception as e:
         logger.error("Error determining reload schedule: %s", e)
         return None, None
+
 
 
 def lambda_handler(event, context):
@@ -500,10 +500,10 @@ def lambda_handler(event, context):
     logger.info('Data aggregation and metadata assingment complete.')
     logger.info('-----------------------------------------')
     logger.info('Packing data to NetCDF...')
-    s3 = S3Connector(BUCKET_NAME, AWS_REGION, AWS_PROFILE)
+    s3 = S3Connector(BUCKET_NAME, AWS_REGION)
     try:
         files = pack_to_netcdf(
-            agg_df, s3, prefix='development', version=__version__)
+            agg_df, s3, prefix=S3_PREFIX, version=__version__)
         
     except Exception as e:
         logger.error("Error packing data to NetCDF: %s", e)
@@ -514,7 +514,7 @@ def lambda_handler(event, context):
     logger.info('Archiving fishbot_realtime')
     try:
         archvie_file_size = s3.archive_fishbot(fishbot_ds, current_time,
-                           version=__version__, prefix='archive_dev')
+                           version=__version__, prefix=S3_ARCHIVE_PREFIX)
 
         logger.info('Fishbot archive created successfully!')
         logger.info('-----------------------------------------')
@@ -556,7 +556,7 @@ def lambda_handler(event, context):
             archive_df = db.update_archive_record(DB_ARCHIVE_TABLE)
         archive_file = '/tmp/fishbot_archive.csv'
         archive_df.to_csv(archive_file, index=False)
-        s3_key = 'development/fishbot_archive.csv'
+        s3_key = f'{S3_PREFIX}/fishbot_archive.csv'
         with open(archive_file, 'rb') as file_obj:
             s3.push_file_to_s3(file_obj, s3_key, content_type="text/csv")
 

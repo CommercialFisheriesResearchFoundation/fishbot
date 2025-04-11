@@ -5,18 +5,17 @@ import os
 import xarray as xr
 import tempfile
 from botocore.config import Config
-logger = logging.getLogger(__name__)
+logger = logging.getLogger()
 
 
 class S3Connector:
     """ Class to handle S3 connections and uploads"""
 
-    def __init__(self, bucket_name, aws_region,aws_profile):
+    def __init__(self, bucket_name, aws_region):
         logger.info('Initializing S3 client with IAM role')
         self.aws_region = aws_region
-        self.aws_profile = aws_profile
         self.bucket_name = bucket_name
-        # session = boto3.Session(profile_name=self.aws_profile) #! ReMOVE AFTER TESTING
+
         session = boto3.Session()
         # increase the max pool connections to 50, default is 10, this speeds up the upload process
         config = Config(max_pool_connections=50)

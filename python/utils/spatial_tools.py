@@ -4,7 +4,7 @@ from shapely.geometry import Point
 import pandas as pd
 import xarray as xr
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger()
 
 
 def gridify_df(df, gdf_grid=None) -> gpd.GeoDataFrame:

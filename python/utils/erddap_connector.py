@@ -3,7 +3,7 @@ from erddapy import ERDDAP
 import logging
 import asyncio
 import pandas as pd
-logger = logging.getLogger(__name__)
+logger = logging.getLogger()
 
 
 def truncate_at_first_space(col_name):
