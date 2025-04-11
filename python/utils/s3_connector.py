@@ -59,7 +59,7 @@ class S3Connector:
                 archvie_file_size = round(os.path.getsize(tmp.name) / (1024 * 1024), 1)  # Convert bytes to MB
 
             with open(tmp.name, 'rb') as f:
-                s3_key = f"{prefix}/{str(current_time).split('T')[0]}.nc"
+                s3_key = f"{prefix}/fishbot_archive_{str(current_time).split('T')[0]}.nc"
                 self.push_file_to_s3(f, s3_key, content_type="application/netcdf")
                
         except Exception as e:
