@@ -1,10 +1,13 @@
 __author__ = 'Linus Stoltz | Data Manager, CFRF'
 __project_team__ = 'Linus Stoltz, Sarah Salois, George Maynard, Mike Morin'
-__doc__ = 'FIShBOT program to aggregate regional data collected by NOAA and CFRF'
-__version__ = '0.5'
+__doc__ = 'FIShBOT program to aggregate regional data into a standarzied daily grid'
+__version__ = '0.6'
 
 import logging
-# from logging.handlers import TimedRotatingFileHandler
+import sys
+# Configure logging before any other imports
+logger = logging.getLogger()
+logger.setLevel(logging.INFO)
 from utils.erddap_connector import ERDDAPClient
 from utils.database_connector import DatabaseConnector
 import utils.spatial_tools as sp
@@ -12,28 +15,13 @@ from utils.netcdf_packing import pack_to_netcdf
 from utils.s3_connector import S3Connector
 import asyncio
 import pandas as pd
-# from dotenv import load_dotenv
+import requests
 import os
 from datetime import datetime, timezone
 from dateutil.relativedelta import relativedelta
 from scipy.signal import medfilt
 import gc
-import argparse
-import sys
-from utils.file_tools import move_files, reload_erddap, test_erddap_archive
 
-# TRADITIONAL DEPLOYMENT LOGGING
-logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
-# handler = TimedRotatingFileHandler(
-#     'fishbot.log', when='midnight', interval=1, backupCount=7)
-# formatter = logging.Formatter(
-#     '%(asctime)s - %(name)s - %(levelname)s - %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
-# handler.setFormatter(formatter)
-# logging.basicConfig(level=logging.INFO, handlers=[handler])
-
-# load the env if local deployment
-# load_dotenv()
 DB_USER = os.getenv('DB_USER')
 DB_PASS = os.getenv('DB_PASS')
 DB_HOST = os.getenv('DB_HOST')
@@ -43,8 +31,9 @@ DB_ARCHIVE_TABLE = os.getenv('DB_ARCHIVE_TABLE')
 DB_EVENTS_TABLE = os.getenv('DB_EVENTS_TABLE')
 BUCKET_NAME = os.getenv('BUCKET_NAME')
 AWS_REGION = os.getenv('REGION')
-AWS_PROFILE = os.getenv('PROFILE')
-ERDDAP_DATA_PATH = os.getenv('ERDDAP_DATA_PATH')
+S3_PREFIX = os.getenv('PREFIX')
+S3_ARCHIVE_PREFIX = os.getenv('ARCHIVE_PREFIX')
+FULL_RELOAD_FLAG = os.getenv('FULL_RELOAD_FLAG', 'False').lower() == 'true'
 
 DATASETS = {
     "cfrf": {
@@ -52,6 +41,14 @@ DATASETS = {
         "dataset_id": ["fixed_gear_oceanography", "shelf_fleet_profiles_1m_binned", "wind_farm_profiles_1m_binned"],
         "protocol": ["tabledap", "tabledap", "tabledap"],
         "response": ["nc", "nc", "nc"],
+        "variables": [
+            ["time", "latitude", "longitude", "temperature",
+                "dissolved_oxygen", "tow_id"],  # for fixed_gear_oceanography
+            ["time", "latitude", "longitude", "conservative_temperature",
+                "sea_pressure", "profile_id", "absolute_salinity"],
+            ["time", "latitude", "longitude", "conservative_temperature",
+                "sea_pressure", "profile_id", "absolute_salinity"]
+        ]
     },
     "emolt": {
         "server": "https://erddap.emolt.net/erddap/",
@@ -61,18 +58,66 @@ DATASETS = {
         "constraints": {
             "eMOLT_RT": {
                 "segment_type=": "Fishing"
+            },
+            "eMOLT_RT_LOWELL": {
+                "water_detect_perc>": 60,
+                "DO>": 0,
+                "temperature>": 0,
+                "temperature<": 27
             }
-        }
+        },
+        "variables": [
+            ["time", "latitude", "longitude",
+                "temperature", "tow_id"],  # for eMOLT_RT
+            ["time", "latitude", "longitude", "temperature", "DO", "tow_id"]
+        ]
     },
     "studyfleet": {
         "server": "",
         "dataset_id": [],  # This will be loaded locally from a CSV file
         "protocol": [],
         "response": [],
+    },
+    "ecomon": {
+        "server": "https://comet.nefsc.noaa.gov/erddap/",
+        "dataset_id": ["ocdbs_v_erddap1"],
+        "protocol": ["tabledap"],
+        "response": ["nc"],
+        "constraints": {"ocdbs_v_erddap1": {
+            "GEAR_TYPE!=": 'Bottle',
+            "latitude>": 34
+        }
+        },
+
+        "variables": [
+            ["UTC_DATETIME", "latitude", "longitude", "sea_water_temperature", "pressure_dbars",
+             "dissolved_oxygen", "sea_water_salinity", "cast_number", "cruise_id"]
+        ]
+    },
+    "archive": {
+        "server": "https://erddap.ondeckdata.com/erddap/",
+        "dataset_id": ["fishbot_realtime"],
+        "protocol": ["tabledap"],
+        "response": ["nc"]
     }
 }
 
-
+def test_erddap_archive() -> bool:
+    server = 'https://erddap.ondeckdata.com/erddap/'
+    dataset_id = 'fishbot_realtime'
+    url = f"{server}tabledap/{dataset_id}.html"
+    try:
+        response = requests.head(url, timeout=10)
+        if response.status_code == 200:
+            logger.info("ERDDAP dataset is reachable: %s", url)
+            return True
+        else:
+            logger.warning("ERDDAP dataset is not reachable. Status code: %d", response.status_code)
+            return False
+    except requests.RequestException as e:
+        logger.error("Error connecting to ERDDAP: %s", e)
+        return False
+    
 def aggregated_data(df) -> pd.DataFrame:
     """ Function to aggregate the standardized data into fishbot format"""
     df.dropna(subset=['id'], inplace=True)
@@ -84,18 +129,21 @@ def aggregated_data(df) -> pd.DataFrame:
             'temperature': ['mean', 'min', 'max', 'std', 'count'],
             'data_provider': 'unique',
             'id': 'first',
-            'geometry': 'first'
+            'geometry': 'first',
+            'fishery_dependent': 'first'
         }
 
         # Check if 'dissolved_oxygen' exists in the dataframe
         if 'dissolved_oxygen' in df.columns:
-            agg_columns['dissolved_oxygen'] = ['mean', 'min', 'max', 'std', 'count']
+            agg_columns['dissolved_oxygen'] = [
+                'mean', 'min', 'max', 'std', 'count']
 
         # Check if 'salinity' exists in the dataframe
         if 'salinity' in df.columns:
             agg_columns['salinity'] = ['mean', 'min', 'max', 'std', 'count']
 
-        df_aggregated = df.groupby(['date', 'centroid']).agg(agg_columns).reset_index()
+        df_aggregated = df.groupby(['date', 'centroid']).agg(
+            agg_columns).reset_index()
     except Exception as e:
         logger.error("Error aggregating data: %s", e)
         return None
@@ -114,17 +162,19 @@ def aggregated_data(df) -> pd.DataFrame:
                                   'salinity_mean': 'salinity',
                                   'data_provider_unique': 'data_provider',
                                   'id_first': 'grid_id',
-                                  'geometry_first': 'geometry'}, inplace=True)
+                                  'geometry_first': 'geometry',
+                                  'fishery_dependent_first':'fishery_dependent'}, inplace=True)
 
     df_aggregated['data_provider'] = df_aggregated['data_provider'].astype(
         str).str.replace(r"[\[\]']", "", regex=True)
-    
+
     return df_aggregated
+
 
 def standardize_df(df, dataset_id) -> pd.DataFrame:
     """ Stanfardize the dataframes to a common format. Each dataset slightly different and some need a little pre processing"""
     keepers = ['time', 'latitude', 'longitude', 'temperature',
-               'salinity', 'dissolved_oxygen', 'data_provider']
+               'salinity', 'dissolved_oxygen', 'data_provider', 'fishery_dependent']
     logger.info('processing %s', dataset_id)
     if df.empty:
         logger.warning('No data returned for %s', dataset_id)
@@ -140,21 +190,21 @@ def standardize_df(df, dataset_id) -> pd.DataFrame:
 
             df_re = df.groupby('tow_id')[filt].apply(
                 lambda x: x.set_index('time').resample('h').mean().reset_index()).reset_index(drop=True)
-            
-            df_re.loc[:,'data_provider'] = 'eMOLT'
+
+            df_re.loc[:, 'data_provider'] = 'eMOLT'
+            df_re.loc[:, 'fishery_dependent'] = 1
+
             existing_columns = [col for col in keepers if col in df_re.columns]
             return df_re[existing_columns]
         except Exception as e:
             logger.error("error processing %s: %s", dataset_id, e)
-            return pd.DataFrame(columns=keepers)  # return an empty dataframe if processing fails
+            # return an empty dataframe if processing fails
+            return pd.DataFrame(columns=keepers)
 
     elif dataset_id == 'eMOLT_RT_LOWELL':
         try:
             df['time'] = pd.to_datetime(df['time'])
             df.reset_index(inplace=True)
-            df = df[(df['water_detect_perc'] > 60) & 
-                    (df['DO'] > 0) & 
-                    (df['temperature'].between(0, 27))]
 
             df['flag'] = df.groupby('tow_id')['DO'].transform(
                 lambda x: (x - x.mean()).abs() > 3 * x.std())
@@ -170,18 +220,20 @@ def standardize_df(df, dataset_id) -> pd.DataFrame:
 
             df_re = df.groupby('tow_id')[filt].apply(
                 lambda x: x.set_index('time').resample('h').mean().reset_index()).reset_index(drop=True)
-            
+
             df_re.rename(
                 columns={'DO_filtered': 'dissolved_oxygen'}, inplace=True)
             df_re = df_re[df_re['dissolved_oxygen'] > 0]
-            df_re.loc[:,'data_provider'] = 'eMOLT'
+            df_re.loc[:, 'data_provider'] = 'eMOLT'
+            df_re.loc[:, 'fishery_dependent'] = 1
 
             existing_columns = [col for col in keepers if col in df_re.columns]
             return df_re[existing_columns]
         except Exception as e:
             logger.error("error processing %s: %s",
                          dataset_id, e, exc_info=True)
-            return pd.DataFrame(columns=keepers)  # return an empty dataframe if processing fails
+            # return an empty dataframe if processing fails
+            return pd.DataFrame(columns=keepers)
     elif dataset_id in ["shelf_fleet_profiles_1m_binned", "wind_farm_profiles_1m_binned"]:
         try:
             df = df.loc[df.groupby('profile_id')['sea_pressure'].idxmax()]
@@ -189,7 +241,11 @@ def standardize_df(df, dataset_id) -> pd.DataFrame:
                      'latitude', 'longitude', 'time']]
             df.rename(columns={'conservative_temperature': 'temperature',
                       'absolute_salinity': 'salinity'}, inplace=True)
-            df.loc[:,'data_provider'] = 'CFRF'
+            df.loc[:, 'data_provider'] = 'CFRF'
+            if dataset_id == "shelf_fleet_profiles_1m_binned":
+                df.loc[:, 'fishery_dependent'] = 1
+            elif dataset_id == "wind_farm_profiles_1m_binned":
+                df.loc[:, 'fishery_dependent'] = 0
             df['time'] = pd.to_datetime(df['time'])
 
             existing_columns = [col for col in keepers if col in df.columns]
@@ -206,13 +262,31 @@ def standardize_df(df, dataset_id) -> pd.DataFrame:
             df['flag'] = df.groupby('tow_id')['dissolved_oxygen'].transform(
                 lambda x: (x - x.mean()).abs() > 3 * x.std())
             df = df.loc[~df['flag']]
-            df.loc[:,'data_provider'] = 'CFRF'
+            df.loc[:, 'data_provider'] = 'CFRF'
+            df.loc[:, 'fishery_dependent'] = 1
 
             existing_columns = [col for col in keepers if col in df.columns]
             return df[existing_columns]
         except Exception as e:
             logger.error("error processing %s: %s", dataset_id, e)
-            return pd.DataFrame(columns=keepers) # return an empty dataframe if processing fails
+            # return an empty dataframe if processing fails
+
+            return pd.DataFrame(columns=keepers)
+
+    elif dataset_id == 'ocdbs_v_erddap1':
+        df.rename(columns={'UTC_DATETIME': 'time',
+                           'sea_water_temperature': 'temperature',
+                           'sea_water_salinity': 'salinity'}, inplace=True)
+        df['profile_id'] = df['cruise_id'].astype(
+            str) + '_' + df['cast_number'].astype(str)
+        df_re = df.loc[df.groupby('profile_id')['pressure_dbars'].idxmax()]
+        df_re.loc[:, 'data_provider'] = 'ECOMON'
+        df_re.loc[:, 'fishery_dependent'] = 0
+        existing_columns = [col for col in keepers if col in df_re.columns]
+        return df_re[existing_columns]
+    else:
+        logger.warning('No processing identified for %s', dataset_id)
+        return pd.DataFrame(columns=keepers)
 
 
 def load_local_studyfleet(gdf_grid, last_runtime) -> pd.DataFrame:
@@ -228,7 +302,8 @@ def load_local_studyfleet(gdf_grid, last_runtime) -> pd.DataFrame:
                            'OBSERVATION_DATE': 'time', 'GRID_ID': 'id', 'TEMP': 'temperature'}, inplace=True)
         study_fleet = study_fleet.merge(
             gdf_grid[['id', 'geometry', 'centroid']], on='id', how='left')
-        study_fleet.loc[:,'data_provider'] = 'StudyFleet'
+        study_fleet.loc[:, 'data_provider'] = 'StudyFleet'
+        study_fleet.loc[:, 'fishery_dependent'] = 1
         study_fleet = study_fleet[study_fleet['time'] > pd.to_datetime(
             last_runtime).replace(tzinfo=None)]
         if study_fleet.empty:
@@ -243,29 +318,35 @@ def load_local_studyfleet(gdf_grid, last_runtime) -> pd.DataFrame:
 
 def determine_reload_schedule() -> tuple:
     """Determine the reload schedule based on the current date and return query time"""
+    if FULL_RELOAD_FLAG:
+        logger.info("Full reload flag is set. Reloading all data.")
+        return 'manual_full', '2000-01-01T00:00:00Z'
     try:
         today = datetime.now()
         # today = pd.to_datetime('2025-01-01T00:00:00Z')  # for testing
         # Annual reload
         if today.month == 1 and today.day == 1:
             logger.info("Annual reload scheduled")
-            return 'full', '1995-01-25T00:00:00Z'
+            return 'full', '2000-01-01T00:00:00Z'
 
         # Quarterly reload
         quarterly_months = [4, 7, 10]
         if today.month in quarterly_months and today.day <= 1:
             logger.info("Quarterly reload scheduled")
-            fetch_threshold = (today - relativedelta(years=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+            fetch_threshold = (today - relativedelta(years=1)
+                            ).replace(hour=0, minute=0, second=0, microsecond=0)
             return 'quarterly', fetch_threshold.isoformat()
 
         # Bi-weekly reload
         if today.day in [1, 15]:
             logger.info("Bi-weekly reload scheduled")
-            fetch_threshold = (today - relativedelta(months=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+            fetch_threshold = (today - relativedelta(months=1)
+                            ).replace(hour=0, minute=0, second=0, microsecond=0)
             return 'bi-weekly', fetch_threshold.isoformat()
 
         # Daily reload
-        fetch_threshold = (today - relativedelta(days=5)).replace(hour=0, minute=0, second=0, microsecond=0)
+        fetch_threshold = (today - relativedelta(days=5)
+                        ).replace(hour=0, minute=0, second=0, microsecond=0)
         logger.info("Daily reload scheduled")
         return 'daily', fetch_threshold.isoformat()
 
@@ -274,12 +355,15 @@ def determine_reload_schedule() -> tuple:
         return None, None
 
 
+
 def lambda_handler(event, context):
     """ main function to call all subroutines"""
-    storage_protocol = 's3'
     logger.info("=============================")
     logger.info("FIShBOT Application started")
-    
+    if not test_erddap_archive():
+        logger.error("ERDDAP dataset is not reachable. Exiting program.")
+        sys.exit(1)
+    logger.info('Determining Reload Schedule...')
     reload_type, query_time = determine_reload_schedule()
 
     current_time = datetime.now(timezone.utc).isoformat()
@@ -287,16 +371,26 @@ def lambda_handler(event, context):
                 reload_type, query_time)
 
     logger.info('getting data from erddap...')
+    dataset_count = sum(len(info["dataset_id"])
+                        for info in DATASETS.values() if "dataset_id" in info)
+    logger.info('Number of datasets being aggregated: %s', dataset_count)
     gdf_grid = sp.get_botgrid()
     dat = ERDDAPClient(DATASETS, query_time)
     results = asyncio.run(dat.fetch_all_data())
 
-    logger.info('Data retrieval complete')
+    logger.info('Data retrieval complete!')
     dataframes = []
     database_log = []  # list to collect dicts for logging to DB
 
     for data_provider, dataset_info in DATASETS.items():
-        if data_provider == 'studyfleet':
+        if data_provider == 'archive':
+            logger.info('Fetching current fishbot_realtime for archive...')
+            fishbot_ds = results.pop(0)
+            if isinstance(fishbot_ds, Exception):
+                logger.error("Error fetching fishbot archive: %s", fishbot_ds)
+                sys.exit(1)
+
+        elif data_provider == 'studyfleet':
             studyfleet = load_local_studyfleet(gdf_grid, query_time)
             database_log.append({
                 "dataset_id": "studyfleet",
@@ -325,8 +419,9 @@ def lambda_handler(event, context):
                         "reload_type": reload_type,
                         "fetch_erddap_success": 1
                     })
+
                     dataframes.append(standardize_df(result, dataset_id))
-                    
+
                 else:
                     database_log.append({
                         "dataset_id": dataset_id,
@@ -344,26 +439,29 @@ def lambda_handler(event, context):
 
     logger.info('Standardizing dataframes complete!')
     logger.info('-----------------------------------')
-    
+
     if dataframes:
         try:
-            dataframes = [df for df in dataframes if not df.empty] # pop missing dataframes
+            # pop missing dataframes
+            dataframes = [df for df in dataframes if not df.empty]
             combined_df = pd.concat(dataframes, ignore_index=True)
 
             if combined_df.empty and studyfleet.empty:  # ! remove this check once study fleet are on erddap
                 logger.info('No data to process, exiting...')
                 return
-            logger.info('Concatenated all dataframes into a single dataframe with %s rows and %s columns. Columns: %s',
-                        combined_df.shape[0], combined_df.shape[1], combined_df.columns)
+            logger.info('Concatenated %s dataframes into a single dataframe with %s rows and %s columns.',
+                        len(dataframes), combined_df.shape[0], combined_df.shape[1])
+            logger.info('concat columns: %s', combined_df.columns.tolist())
         except ValueError as e:
-            logger.info('%s : exiting ...',e)
+            logger.info('%s : exiting ...', e)
             return
     else:
         logger.info('No new data to process, exiting...')
         return
 
+    
     standard_df = sp.gridify_df(combined_df, gdf_grid)
-
+    logger.info('grid assiggment complete!')
     try:
         full_fleet = pd.concat([studyfleet, standard_df], ignore_index=True)
     except Exception as e:
@@ -371,13 +469,16 @@ def lambda_handler(event, context):
         full_fleet = combined_df
     try:
         try:
+            logger.info('Freeing up memory...')
             dataframes.clear()
             # free up memory before aggregation
             del standard_df, studyfleet, combined_df, dataframes
             gc.collect()
+            logger.info('aggregating data to daily averages...')
             agg_df = aggregated_data(full_fleet)
             del full_fleet
             gc.collect()
+            logger.info('aggregation complete!')
         except Exception as e:
             logger.error("Error freeing memory data: %s", e)
             raise
@@ -399,11 +500,11 @@ def lambda_handler(event, context):
     logger.info('Data aggregation and metadata assingment complete.')
     logger.info('-----------------------------------------')
     logger.info('Packing data to NetCDF...')
-    s3 = S3Connector(BUCKET_NAME, AWS_REGION, AWS_PROFILE)
+    s3 = S3Connector(BUCKET_NAME, AWS_REGION)
     try:
         files = pack_to_netcdf(
-            agg_df, output_path='/tmp', version=__version__) # set this to the local path
-
+            agg_df, s3, prefix=S3_PREFIX, version=__version__)
+        
     except Exception as e:
         logger.error("Error packing data to NetCDF: %s", e)
         raise
@@ -412,9 +513,9 @@ def lambda_handler(event, context):
     logger.info('-----------------------------------------')
     logger.info('Archiving fishbot_realtime')
     try:
-        fishbot_archive = dat.archive_fishbot(
-            current_time, version=__version__, storage_protocol=storage_protocol)
-        archvie_file_size = os.path.getsize(fishbot_archive) / (1024 * 1024)  # Convert bytes to MB
+        archvie_file_size = s3.archive_fishbot(fishbot_ds, current_time,
+                           version=__version__, prefix=S3_ARCHIVE_PREFIX)
+
         logger.info('Fishbot archive created successfully!')
         logger.info('-----------------------------------------')
     except Exception as e:
@@ -422,27 +523,14 @@ def lambda_handler(event, context):
         raise
     try:
         logger.info("Pushing fishbot archive to S3")
-        s3.push_to_s3(fishbot_archive, prefix='archive')
         archive_key = s3.get_archive_key()
         public_url = s3.get_archive_url()
         logger.info("Archive key: %s", public_url)
-        logger.info("Pushed fishbot archive to S3")
-        logger.info("Pushing fishbot_realtime to S3")
 
-        if storage_protocol == 'local':
-            move_files(files, ERDDAP_DATA_PATH)
-            logger.info("Moved fishbot_realtime to %s", ERDDAP_DATA_PATH)
-            reload_erddap(ERDDAP_DATA_PATH, 'fishbot_realtime')
-            
-        elif storage_protocol == 's3':
-            s3.push_to_s3(files)
-            logger.info("Pushed fishbot_realtime to S3")
     except Exception as e:
         logger.error("Error archiving fishbot: %s", e)
         raise
-    finally:
-        logger.info('Deleting local archive file')
-        os.remove(fishbot_archive)
+
     logger.info('logging the archive in the database')
     try:
         with DatabaseConnector(DB_HOST, DB_USER, DB_PASS, DB) as db:
@@ -462,48 +550,20 @@ def lambda_handler(event, context):
         logger.error("Error logging archive to DB: %s", e, exc_info=True)
         raise
     logger.info('-----------------------------------------')
-    if storage_protocol == 'local':
-        logger.info('Updating fishbot_archive dataset in ERDDAP')
-        with DatabaseConnector(DB_HOST, DB_USER, DB_PASS, DB) as db:
-            archive_df = db.update_archive_record(DB_ARCHIVE_TABLE)
-        archive_local = os.path.join(ERDDAP_DATA_PATH, 'datasets/fishbot/fishbot_archive.csv')
-        archive_df.to_csv(archive_local, index=False)
-        logger.info("Archive data saved to %s", archive_local)
-        # move_files([archive_local], ERDDAP_DATA_PATH)
-        reload_erddap(ERDDAP_DATA_PATH, 'fishbot_archive')
-        logger.info("Fishbot archive dataset updated in ERDDAP")
-        logger.info('-----------------------------------------')
-    elif storage_protocol == 's3':
+    try:
         logger.info('Updating fishbot_archive dataset in S3')
         with DatabaseConnector(DB_HOST, DB_USER, DB_PASS, DB) as db:
             archive_df = db.update_archive_record(DB_ARCHIVE_TABLE)
         archive_file = '/tmp/fishbot_archive.csv'
         archive_df.to_csv(archive_file, index=False)
-        s3.push_to_s3(archive_file)
-        logger.info("Archive dataset %s pushed to S3", archive_file)
+        s3_key = f'{S3_PREFIX}/fishbot_archive.csv'
+        with open(archive_file, 'rb') as file_obj:
+            s3.push_file_to_s3(file_obj, s3_key, content_type="text/csv")
 
+        logger.info("Archive dataset %s pushed to S3", archive_file)
+    except Exception as e:
+        logger.error("Error updating fishbot archive dataset: %s", e, exc_info=True)
+        raise
 
     logger.info("Application complete!")
     logger.info("=============================")
-
-
-# if __name__ == '__main__':
-
-#     parser = argparse.ArgumentParser(description="FIShBOT Application")
-#     parser.add_argument('-s', '--storage_protocol', type=str, default='s3', choices=['s3', 'local'],
-#                         help="Specify the storage protocol to use (default: s3)")
-#     args = parser.parse_args()
-
-#     logger.info("=============================")
-#     logger.info("FIShBOT Application started")
-
-#     if not test_erddap_archive():
-#         logger.error("ERDDAP archive is not reachable. Exiting...")
-#         sys.exit(1)
-    
-#     reload_type, query_time = determine_reload_schedule()
-
-#     main(reload_type, query_time, storage_protocol=args.storage_protocol)
-
-#     logger.info("Application complete!")
-#     logger.info("=============================")

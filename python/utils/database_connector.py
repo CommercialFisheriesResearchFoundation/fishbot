@@ -1,7 +1,7 @@
 import mysql.connector
 import logging
 import pandas as pd
-logger = logging.getLogger(__name__)
+logger = logging.getLogger()
 
 
 class DatabaseConnector:
@@ -119,7 +119,7 @@ class DatabaseConnector:
         """ updates the archive record in the database"""
         try:
             cursor = self.connection.cursor()
-            query = f"SELECT version, doi, reload_type, DATE(archive_date) as time, archive_public_url as file_url FROM {table_name} "
+            query = f"SELECT version, doi, reload_type, DATE(archive_date) as time, archive_public_url as file_url, file_size_mb FROM {table_name} "
             cursor.execute(query)
             results = cursor.fetchall()
             columns = [desc[0] for desc in cursor.description]

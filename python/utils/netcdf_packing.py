@@ -4,6 +4,8 @@ import pandas as pd
 from datetime import datetime, timedelta
 import logging
 from utils.s3_connector import S3Connector
+from concurrent.futures import ThreadPoolExecutor
+import tempfile
 logger = logging.getLogger(__name__)
 
 
@@ -124,12 +126,126 @@ def set_variable_attrs(var_name) -> dict:
             "units": "",
             "long_name": "grid_cell_identifier",
             "comment": "Identifier of the grid cell from the predefined 7km grid of US Northeast"
+        },
+        "fishery_dependent": {
+            "units": "",
+            "long_name": "Fishery (In)Dependent Flag",
+            "comment": "Boolean flag indicating if the observation was made using fishery dependent (1) or independent (0) data collection methods."
         }
     }
     return attrs.get(var_name, {})
 
-def pack_to_netcdf(df_out, output_path="data_out", version="0.1") -> list:
-    """Tool to create daily nc files for output of the entire grid. Function also returns a list of all created file names for pushing to S3."""
+def process_group(day, group, s3_conn, prefix, version):
+    """Process a single group, write NetCDF, and  upload to S3."""
+    # Check argument types
+    if not isinstance(day, int):
+        raise TypeError(f"Expected 'day' to be int, got {type(day).__name__}")
+    if not isinstance(group, pd.DataFrame):
+        raise TypeError(f"Expected 'group' to be pandas DataFrame, got {type(group).__name__}")
+    if not isinstance(s3_conn, S3Connector):
+        raise TypeError(f"Expected 's3_conn' to be S3Connector, got {type(s3_conn).__name__}")
+    if not isinstance(prefix, str):
+        raise TypeError(f"Expected 'prefix' to be str, got {type(prefix).__name__}")
+    if not isinstance(version, str):
+        raise TypeError(f"Expected 'version' to be str, got {type(version).__name__}")
+
+    # Create dataset
+    exclude_vars = {"time", "latitude", "longitude"}
+    data_vars = {
+        var: ("time", group[var].values)
+        for var in group.columns if var not in exclude_vars
+    }
+
+    ds = xr.Dataset(
+        data_vars,
+        coords={
+            "time": ("time", [day] * len(group)),
+            "latitude": ("time", group["latitude"].values),
+            "longitude": ("time", group["longitude"].values),
+        },
+    )
+    ds.encoding["unlimited_dims"] = {"time"}
+
+    # Set attributes
+    for var in ds.data_vars:
+        ds[var].attrs = set_variable_attrs(var)
+    for coord in ds.coords:
+        ds[coord].attrs = set_variable_attrs(coord)
+
+    ds.attrs.update({
+        "title": "Fishing Industry Shared Bottom Oceanographic Timeseries",
+        "description": "Gridded daily observations of demersal oceanographic observations and related metrics.",
+        "institution": "CFRF | NOAA NEFSC",
+        "version": version,
+    })
+
+    # Cast variables
+    cast_map = {
+        "temperature": "float32",
+        "temperature_std": "float32",
+        "temperature_min": "float32",
+        "temperature_max": "float32",
+        "temperature_count": "uint32",
+        "dissolved_oxygen": "float32",
+        "dissolved_oxygen_std": "float32",
+        "dissolved_oxygen_min": "float32",
+        "dissolved_oxygen_max": "float32",
+        "dissolved_oxygen_count": "uint32",
+        "salinity": "float32",
+        "salinity_std": "float32",
+        "salinity_min": "float32",
+        "salinity_max": "float32",
+        "salinity_count": "uint32",
+        "depth": "uint32",
+        "latitude": "float32",
+        "longitude": "float32",
+        "time": "uint32",
+        "stat_area": "uint32",
+        "grid_id": "uint32",
+        "data_provider": "S32",
+        "fishery_dependent": "uint8",
+    }
+    for var, dtype in cast_map.items():
+        if var in ds:
+            ds[var] = ds[var].astype(dtype)
+
+    # Output path setup
+    date = datetime(1970, 1, 1) + timedelta(days=day)
+    year, month = date.year, date.month
+    s3_key = f"{prefix}/{year}/{month}/fishbot_{day}.nc"
+
+    try:
+        logger.info("Dataset columns: %s", list(ds.data_vars.keys()))
+        with tempfile.NamedTemporaryFile(suffix=".nc", dir="/tmp", delete=False) as tmp:
+            ds.to_netcdf(tmp.name, mode="w", engine="scipy")
+
+        # Re-open the file to pass it as a file-like object to push_buffer_to_s3
+        with open(tmp.name, 'rb') as f:
+            s3_conn.push_file_to_s3(f, s3_key, content_type="application/netcdf")
+
+    except Exception as e:
+        logger.error("Failed to upload to S3: %s", e)
+        raise
+    finally:
+        try:
+            os.remove(tmp.name)  # clean up
+        except Exception as cleanup_error:
+            logger.warning("Could not remove temp file: %s", cleanup_error)
+
+    return s3_key
+
+
+def pack_to_netcdf(df_out, s3_conn, prefix='development', version="0.1") -> list:
+    """Tool to create daily nc files for output of the entire grid and upload to S3."""
+    # Validate arguments
+    if not isinstance(df_out, pd.DataFrame):
+        raise TypeError(f"Expected 'df_out' to be pandas DataFrame, got {type(df_out).__name__}")
+    if not isinstance(s3_conn, S3Connector):
+        raise TypeError(f"Expected 's3_conn' to be S3Connector, got {type(s3_conn).__name__}")
+    if not isinstance(prefix, str):
+        raise TypeError(f"Expected 'prefix' to be str, got {type(prefix).__name__}")
+    if not isinstance(version, str):
+        raise TypeError(f"Expected 'version' to be str, got {type(version).__name__}")
     
     try:
         df_out['time'] = pd.to_datetime(df_out['time'])
@@ -147,197 +263,19 @@ def pack_to_netcdf(df_out, output_path="data_out", version="0.1") -> list:
         logger.error('could not filter out invalid data: %s', e)
         raise
 
+    s3_keys = []
     grouped = df_out.groupby("time")
-    filenames = []
-    try:
-        for day, group in grouped:
-            # Identify variables to include in dataset
-            exclude_vars = {"time", "latitude", "longitude"}
-            data_vars = {
-                var: ("time", group[var].values)
-                for var in group.columns if var not in exclude_vars
-            }
 
-            ds = xr.Dataset(
-                data_vars,
-                coords={
-                    "time": ("time", [day] * len(group)),
-                    "latitude": ("time", group["latitude"].values),
-                    "longitude": ("time", group["longitude"].values),
-                },
-            )
-            ds.encoding["unlimited_dims"] = {"time"}
+    with ThreadPoolExecutor() as executor:
+        futures = [
+            executor.submit(process_group, day, group, s3_conn, prefix, version)
+            for day, group in grouped
+        ]
+        for future in futures:
+            try:
+                s3_keys.append(future.result())
+            except Exception as e:
+                logger.error("Error processing group: %s", e)
+                raise
 
-            for var in ds.data_vars:
-                ds[var].attrs = set_variable_attrs(var)
-
-            for coord in ds.coords:
-                ds[coord].attrs = set_variable_attrs(coord)
-
-            ds.attrs["title"] = "Fishing Industry Shared Bottom Oceanographic Timeseries"
-            ds.attrs["description"] = "Gridded daily observations of demersal oceanographic observations and related metrics."
-            ds.attrs["institution"] = "CFRF | NOAA NEFSC"
-            ds.attrs["version"] = version
-            def safe_cast(var, dtype):
-                if var in ds:
-                    ds[var] = ds[var].astype(dtype)
-            # Cast common variables
-            cast_map = {
-                "temperature": "float32",
-                "temperature_std": "float32",
-                "temperature_min": "float32",
-                "temperature_max": "float32",
-                "temperature_count": "uint32",
-                "dissolved_oxygen": "float32",
-                "dissolved_oxygen_std": "float32",
-                "dissolved_oxygen_min": "float32",
-                "dissolved_oxygen_max": "float32",
-                "dissolved_oxygen_count": "uint32",
-                "salinity": "float32",
-                "salinity_std": "float32",
-                "salinity_min": "float32",
-                "salinity_max": "float32",
-                "salinity_count": "uint32",
-                "depth": "uint32",
-                "latitude": "float32",
-                "longitude": "float32",
-                "time": "uint32",
-                "stat_area": "uint32",
-                "grid_id": "uint32",
-                "data_provider": "S32",
-            }
-
-            for var, dtype in cast_map.items():
-                safe_cast(var, dtype)
-
-            # Output path setup
-            date = datetime(1970, 1, 1) + timedelta(days=day)
-            year, month = date.year, date.month
-
-            if isinstance(output_path, S3Connector):
-                # S3 upload
-                directory = f"/tmp/{year}/{month}"
-                os.makedirs(directory, exist_ok=True)
-                filename = f"{directory}/fishbot_{day}.nc"
-                ds.to_netcdf(filename)
-
-                # s3_key = f"{year}/{month}/fishbot_{day}.nc"
-                try:
-                    output_path.push_to_s3(filename)
-  
-                except Exception as e:
-                    logger.error("Failed to upload %s to S3: %s", filename, e)
-                    raise
-
-                finally:
-                    # Delete the local file
-                    os.remove(filename)
-                
-            else:
-                directory = f"{output_path}/{year}/{month}"
-                os.makedirs(directory, exist_ok=True)
-                filename = f"{directory}/fishbot_{day}.nc"
-                ds.to_netcdf(filename)
-                filenames.append(filename)
-
-        return filenames
-    except Exception as e:
-        logger.error('could not write to netcdf: %s', e)
-        raise
-# def safe_cast(var, dtype):
-#     if var in ds:
-#         ds[var] = ds[var].astype(dtype)
-#         ds[var].attrs = set_variable_attrs(var)
-
-# def pack_to_netcdf(df_out, output_path="data/nc_out_full", version="0.1") -> list:
-#     """ tool to create daily nc files for output of the entire grid. Function also returns a list of all created file names for pushing to S3."""
-#     try:
-#         df_out['time'] = pd.to_datetime(df_out['time'])
-#         epoch = datetime(1970, 1, 1)
-#         df_out['time'] = (df_out['time'] - epoch).dt.days
-#     except Exception as e:
-#         logger.error(
-#             'could not covert time stamp to days since 1970-01-01: %s', e)
-#         raise
-
-#     try:
-#         logger.info('filtering un reasonable positions and values...')
-#         df_out = df_out[(df_out['depth'] < 900) & (df_out['depth'] > 1)]
-#         df_out = df_out[(df_out['temperature'] > 0) &
-#                         (df_out['temperature'] < 27)]
-#     except Exception as e:
-#         logger.error('could not filter out invalid data: %s', e)
-#         raise
-
-#     grouped = df_out.groupby("time")
-#     filenames = []
-#     try:
-#         for day, group in grouped:
-#             ds = xr.Dataset(
-#                 {
-#                     var: ("time", group[var].values)
-#                     for var in group.columns if var not in ["time", "latitude", "longitude"]
-#                 },
-#                 coords={
-#                     "time": ("time", [day] * len(group)),
-#                     "latitude": ("time", group["latitude"].values),
-#                     "longitude": ("time", group["longitude"].values),
-#                 },
-#             )
-#             ds.encoding["unlimited_dims"] = {"time"}
-
-#             for var in ds.data_vars:
-#                 ds[var].attrs = set_variable_attrs(var)
-
-#             for coord in ds.coords:
-#                 ds[coord].attrs = set_variable_attrs(coord)
-
-#             ds.attrs["title"] = "Fishing Industry Shared Bottom Oceanographic Timeseries"
-#             ds.attrs["description"] = "Gridded daily observations of demersal oceanographic observations and related metrics."
-#             ds.attrs["institution"] = "CFRF | NOAA NEFSC"
-#             ds.attrs["version"] = version
-
-#             ds["temperature"] = ds["temperature"].astype("float32")
-#             ds["temperature_std"] = ds["temperature_std"].astype("float32")
-#             ds["temperature_min"] = ds["temperature_min"].astype("float32")
-#             ds["temperature_max"] = ds["temperature_max"].astype("float32")
-#             ds["temperature_count"] = ds["temperature_count"].astype("uint32")
-
-#             ds["dissolved_oxygen"] = ds["dissolved_oxygen"].astype("float32")
-#             ds["dissolved_oxygen_std"] = ds["dissolved_oxygen_std"].astype(
-#                 "float32")
-#             ds["dissolved_oxygen_min"] = ds["dissolved_oxygen_min"].astype(
-#                 "float32")
-#             ds["dissolved_oxygen_max"] = ds["dissolved_oxygen_max"].astype(
-#                 "float32")
-#             ds["dissolved_oxygen_count"] = ds["dissolved_oxygen_count"].astype(
-#                 "uint32")
-
-#             ds["salinity"] = ds["salinity"].astype("float32")
-#             ds["salinity_std"] = ds["salinity_std"].astype("float32")
-#             ds["salinity_min"] = ds["salinity_min"].astype("float32")
-#             ds["salinity_max"] = ds["salinity_max"].astype("float32")
-#             ds["salinity_count"] = ds["salinity_count"].astype("uint32")
-#             ds["depth"] = ds["depth"].astype("uint32")
-#             ds["latitude"] = ds["latitude"].astype("float32")
-#             ds["longitude"] = ds["longitude"].astype("float32")
-#             ds["time"] = ds["time"].astype("uint32")
-#             ds["stat_area"] = ds["stat_area"].astype("uint32")
-#             ds["grid_id"] = ds["grid_id"].astype("uint32")
-#             ds["data_provider"] = ds["data_provider"].astype("S32")
-
-#             date = datetime(1970, 1, 1) + timedelta(days=day)
-#             year = date.year
-#             month = date.month
-
-#             directory = f"{output_path}/{year}/{month}"
-#             if not os.path.exists(directory):
-#                 os.makedirs(directory)
-#             filename = f"{directory}/fishbot_{day}.nc"
-#             ds.to_netcdf(filename)
-#             filenames.append(filename)
-
-#         return filenames
-#     except Exception as e:
-#         logger.error('could not write to netcdf: %s', e)
-#         raise
+    return s3_keys

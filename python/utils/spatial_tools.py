@@ -4,12 +4,12 @@ from shapely.geometry import Point
 import pandas as pd
 import xarray as xr
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger()
 
 
 def gridify_df(df, gdf_grid=None) -> gpd.GeoDataFrame:
     """Takes the standardized df and assigns grid values, returning a GeoDataFrame"""
-
+    logger.info("Gridifying the data")
     if not isinstance(gdf_grid, gpd.GeoDataFrame):
         gdf_grid = get_botgrid()
 
