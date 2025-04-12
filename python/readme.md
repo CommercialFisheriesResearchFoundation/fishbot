@@ -17,7 +17,7 @@ Annually, all data are completely refreshed from  all available datasets.
 The dynamic refresh interval balances making real-time data accessible quickly and optimizing storage and performance. The contributing groups to fishbot rely on a rolling QA/QC schedule and often receive data at intermittent intervals from the fleet. To capture the dynamic nature of data contributing to FISHBOT, the program itself must be dynamic to reflect perpetual QA/QC efforts. 
 
 ## See this live
-![Bottom temperature from the past 2 weeks](https://erddap.ondeckdata.com/erddap/tabledap/fishbot_realtime.graph?latitude%2Clongitude%2Ctemperature&time%3E=now-14days&time%3C=now&.draw=markers&.marker=5%7C5&.color=0x000000&.colorBar=%7CC%7C%7C%7C%7C&.bgColor=0xffccccff)
+![Live bottom temperature - last 2 weeks](https://erddap.ondeckdata.com/erddap/tabledap/fishbot_realtime.largePng?latitude,longitude,temperature&time>=now-14days&time<now&.draw=markers&.marker=5%7C5&.color=0x000000&.colorBar=%7CC%7C%7C%7C%7C&.bgColor=0xffccccff)
 
 
 
