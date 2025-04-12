@@ -24,7 +24,8 @@ Access the data aggregated to [FIShBOT Realtime](https://erddap.ondeckdata.com/e
 For static archive access see the companion archive dataset [FIshBOT Archive](https://erddap.ondeckdata.com/erddap/tabledap/fishbot_archive.html)
 
 
-![Live bottom temperature - last 2 weeks][(https://erddap.ondeckdata.com/erddap/tabledap/fishbot_realtime.largePng?latitude,longitude,temperature&time>=now-14days&time<now&.draw=markers&.marker=5%7C5&.color=0x000000&.colorBar=%7CC%7C%7C%7C%7C&.bgColor=0xffccccff](https://erddap.ondeckdata.com/erddap/tabledap/fishbot_realtime.largePng?latitude,longitude,time&.draw=markers&.marker=5%7C3&.color=0x000000&.colorBar=%7CC%7C%7C%7C%7C&.bgColor=0xffccccff)
+![Map of fishbot_realtime positions (black markers)](https://erddap.ondeckdata.com/erddap/tabledap/fishbot_realtime.largePng?latitude,longitude,time&.draw=markers&.marker=5%7C3&.color=0x000000&.colorBar=%7CC%7C%7C%7C%7C&.bgColor=0xffccccff)
+
 
 
 
