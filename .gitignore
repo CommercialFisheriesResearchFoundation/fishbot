@@ -15,18 +15,17 @@
 # local folders
 /figures
 
-# python environemnt stuff
-python/env/
-python/utils/__pycache__/
+# python local testing
 python_tools/
 
-python/glory*/
-python/data/local_data/
+
+
+data/local_data/
+env/
 
 *.png
 fishbot*.nc
-*.log*
-*.log
+
 *.sh
 *.env
 *.ipynb
