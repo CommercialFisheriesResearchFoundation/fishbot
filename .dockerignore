@@ -1,16 +1,11 @@
-# Clean this mess up after testing
-data/black_sea_bass/
-data/nc_out_full/
-data/strata/
-erddap/
+# Ignore data directories not needed for the Docker build
 env/
-glorys-comparison/
-test/
+python_tools/
+R_tools/
 
-fishbot_archive*
-intermediate_data.csv
-overlapping_data.csv
-readme.md
+# ignore misc repo files
+README.md
 *.sh
-*.ipynb
 .env
+.gitignore
+License.txt
