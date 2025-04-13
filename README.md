@@ -1,6 +1,6 @@
 ## Fishing Industry Shared Bottom Oceanographic Timeseries
 
-## About
+## About FIShBOT
 FIShBOT is a python program deployed as a docker container on AWS lambda. The program is configured to run daily and synchronize multiple data sources and add them to the fishbot_realtime dataset dynamically. 
 
 Before pushing the latest aggregated dataset to S3, the current publicly available FISHBOT dataset is archived. The url to access the complete dataset is available as a url in the fishbot_archive dataset. Therefore all previous versions of the dataset are accessible in a static manner for future analysis and reference. 
