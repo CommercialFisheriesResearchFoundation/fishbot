@@ -17,10 +17,10 @@ Disclaimer: This repository is a scientific product and is not official communic
 
 Fishbot is updated dynamically based on the calendar. If a dataset is not publicly accessible at the time of program start (midnight EST) then those data will not be available in FishBot_realtime.
 
-Daily, the last 5 days of data are synchronized across all available datasets.
-Bi-weekly, the last 30 days of data are synchronized across all available datasets.
-Quarterly, the last 365 days of data are synchronized across all available datasets.
-Annually, all data are completely refreshed from  all available datasets.
+**Daily**, the last 5 days of data are synchronized across all available datasets.<br>
+**Bi-weekly**, the last 30 days of data are synchronized across all available datasets.<br>
+**Quarterly**, the last 365 days of data are synchronized across all available datasets.<br>
+**Annually**, all data are completely refreshed from  all available datasets.<br>
 
 The dynamic refresh interval balances making real-time data accessible quickly and optimizing storage and performance. The contributing groups to fishbot rely on a rolling QA/QC schedule and often receive data at intermittent intervals from the fleet. To capture the dynamic nature of data contributing to FISHBOT, the program itself must be dynamic to reflect perpetual QA/QC efforts. 
 
