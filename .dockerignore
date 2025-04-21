@@ -1,11 +1,7 @@
-# Ignore data directories not needed for the Docker build
-env/
-python_tools/
-R_tools/
-
-# ignore misc repo files
-README.md
-*.sh
-.env
-.gitignore
-License.txt
+# Docker ignore file, omits everything but the specified directories
+*
+!lambda-fetch/
+!lambda-process/
+!utils/
+!botgrid/
+!data/

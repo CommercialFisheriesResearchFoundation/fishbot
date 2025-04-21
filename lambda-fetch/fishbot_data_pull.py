@@ -1,7 +1,7 @@
 __author__ = 'Linus Stoltz | Data Manager, CFRF'
 __project_team__ = 'Linus Stoltz, Sarah Salois, George Maynard, Mike Morin'
-__doc__ = 'FIShBOT program to aggregate regional data into a standarzied daily grid'
-__version__ = '0.6'
+__doc__ = 'FIShBOT program Step 1: Fetches data from ERDDAP and local files, standardizes, and saves to S3.'
+__version__ = '0.1'
 
 import logging
 import sys
@@ -9,10 +9,10 @@ import sys
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 from utils.erddap_connector import ERDDAPClient
-from utils.database_connector import DatabaseConnector
+# from utils.database_connector import DatabaseConnector
 import utils.spatial_tools as sp
-from utils.netcdf_packing import pack_to_netcdf
-from utils.s3_connector import S3Connector
+# from utils.netcdf_packing import pack_to_netcdf
+# from utils.s3_connector import S3Connector
 import asyncio
 import pandas as pd
 import requests
@@ -20,19 +20,20 @@ import os
 from datetime import datetime, timezone
 from dateutil.relativedelta import relativedelta
 from scipy.signal import medfilt
-import gc
+import boto3
+import sqlite3
 
-DB_USER = os.getenv('DB_USER')
-DB_PASS = os.getenv('DB_PASS')
-DB_HOST = os.getenv('DB_HOST')
-DB = os.getenv('DB')
-DB_TABLE = os.getenv('DB_TABLE')
-DB_ARCHIVE_TABLE = os.getenv('DB_ARCHIVE_TABLE')
-DB_EVENTS_TABLE = os.getenv('DB_EVENTS_TABLE')
+# DB_USER = os.getenv('DB_USER')
+# DB_PASS = os.getenv('DB_PASS')
+# DB_HOST = os.getenv('DB_HOST')
+# DB = os.getenv('DB')
+# DB_TABLE = os.getenv('DB_TABLE')
+# DB_ARCHIVE_TABLE = os.getenv('DB_ARCHIVE_TABLE')
+# DB_EVENTS_TABLE = os.getenv('DB_EVENTS_TABLE')
 BUCKET_NAME = os.getenv('BUCKET_NAME')
 AWS_REGION = os.getenv('REGION')
 S3_PREFIX = os.getenv('PREFIX')
-S3_ARCHIVE_PREFIX = os.getenv('ARCHIVE_PREFIX')
+# S3_ARCHIVE_PREFIX = os.getenv('ARCHIVE_PREFIX')
 FULL_RELOAD_FLAG = os.getenv('FULL_RELOAD_FLAG', 'False').lower() == 'true'
 
 DATASETS = {
@@ -117,59 +118,6 @@ def test_erddap_archive() -> bool:
     except requests.RequestException as e:
         logger.error("Error connecting to ERDDAP: %s", e)
         return False
-    
-def aggregated_data(df) -> pd.DataFrame:
-    """ Function to aggregate the standardized data into fishbot format"""
-    df.dropna(subset=['id'], inplace=True)
-    df['id'] = df['id'].astype(int)
-    df['date'] = df['time'].dt.date
-
-    try:
-        agg_columns = {
-            'temperature': ['mean', 'min', 'max', 'std', 'count'],
-            'data_provider': 'unique',
-            'id': 'first',
-            'geometry': 'first',
-            'fishery_dependent': 'first'
-        }
-
-        # Check if 'dissolved_oxygen' exists in the dataframe
-        if 'dissolved_oxygen' in df.columns:
-            agg_columns['dissolved_oxygen'] = [
-                'mean', 'min', 'max', 'std', 'count']
-
-        # Check if 'salinity' exists in the dataframe
-        if 'salinity' in df.columns:
-            agg_columns['salinity'] = ['mean', 'min', 'max', 'std', 'count']
-
-        df_aggregated = df.groupby(['date', 'centroid']).agg(
-            agg_columns).reset_index()
-    except Exception as e:
-        logger.error("Error aggregating data: %s", e)
-        return None
-    df_aggregated.columns = [
-        '_'.join(filter(None, col)).strip() if col[1] else col[0]
-        for col in df_aggregated.columns.to_flat_index()
-    ]
-    df_aggregated['latitude'] = df_aggregated['centroid'].apply(
-        lambda point: point.y)
-    df_aggregated['longitude'] = df_aggregated['centroid'].apply(
-        lambda point: point.x)
-    df_aggregated = df_aggregated.drop(columns=['centroid'])
-    df_aggregated.rename(columns={'date': 'time',
-                                  'temperature_mean': 'temperature',
-                                  'dissolved_oxygen_mean': 'dissolved_oxygen',
-                                  'salinity_mean': 'salinity',
-                                  'data_provider_unique': 'data_provider',
-                                  'id_first': 'grid_id',
-                                  'geometry_first': 'geometry',
-                                  'fishery_dependent_first':'fishery_dependent'}, inplace=True)
-
-    df_aggregated['data_provider'] = df_aggregated['data_provider'].astype(
-        str).str.replace(r"[\[\]']", "", regex=True)
-
-    return df_aggregated
-
 
 def standardize_df(df, dataset_id) -> pd.DataFrame:
     """ Stanfardize the dataframes to a common format. Each dataset slightly different and some need a little pre processing"""
@@ -179,6 +127,7 @@ def standardize_df(df, dataset_id) -> pd.DataFrame:
     if df.empty:
         logger.warning('No data returned for %s', dataset_id)
         return pd.DataFrame(columns=keepers)
+    df.name = dataset_id
 
     logger.info('dataframe has %s rows and %s columns',
                 df.shape[0], df.shape[1])
@@ -309,6 +258,7 @@ def load_local_studyfleet(gdf_grid, last_runtime) -> pd.DataFrame:
         if study_fleet.empty:
             logger.info('No recent data in Study Fleet local')
             return pd.DataFrame()
+        study_fleet.drop(columns=['geometry'], inplace=True)
     except Exception as e:
         logger.error("Error loading local studyfleet data: %s", e)
         raise
@@ -353,8 +303,64 @@ def determine_reload_schedule() -> tuple:
     except Exception as e:
         logger.error("Error determining reload schedule: %s", e)
         return None, None
+    
+def save_to_sqlite(df, database_log, db_name):
+    """
+    Save the combined dataframe and database log to SQLite tables in one database.
 
+    Args:
+        df (pd.DataFrame): The combined dataframe to save.
+        database_log (list): A list of dictionaries containing log information.
+        db_name (str): The name of the SQLite database file.
+    """
+    df.dropna(subset=['id'], inplace=True)
+    df['latitude'] = df['centroid'].apply(
+        lambda point: point.y).astype(float)
+    df['longitude'] = df['centroid'].apply(
+        lambda point: point.x).astype(float)
+    df = df.drop(columns=['centroid','geometry'])
+    for col in df.columns:
+        logger.info('column %s has type %s', col, df[col].dtype)
+    try:
+        # Connect to SQLite database
+        conn = sqlite3.connect(db_name)
 
+        # Save the combined dataframe to a table
+        df.to_sql('aggregated_data', conn, if_exists='replace', index=False)
+        logger.info('Combined dataframe saved to SQLite database at %s', db_name)
+
+        # Save the database log to a separate table
+        db_log_df = pd.DataFrame(database_log)
+        db_log_df.to_sql('database_log', conn, if_exists='replace', index=False)
+        logger.info('Database log saved to SQLite database at %s', db_name)
+
+    except Exception as e:
+        logger.error('Error saving data to SQLite: %s', e)
+    finally:
+        # Close the database connection
+        conn.close()
+
+def push_to_s3(file_path, bucket_name, s3_key):
+    """
+    Push a single file to an S3 bucket.
+
+    Args:
+        file_path (str): The local path to the file to upload.
+        bucket_name (str): The name of the S3 bucket.
+        s3_key (str): The key (path) in the S3 bucket where the file will be stored.
+
+    Returns:
+        bool: True if the upload was successful, False otherwise.
+    """
+    try:
+        s3_client = boto3.client('s3', region_name=AWS_REGION)
+        s3_client.upload_file(file_path, bucket_name, s3_key)
+        logger.info("File %s successfully uploaded to S3 bucket %s with key %s", file_path, bucket_name, s3_key)
+        return True
+    except Exception as e:
+        logger.error("Error uploading file to S3: %s", e)
+        return False
+    
 
 def lambda_handler(event, context):
     """ main function to call all subroutines"""
@@ -434,9 +440,6 @@ def lambda_handler(event, context):
                         "fetch_erddap_success": 0
                     })
 
-    with DatabaseConnector(DB_HOST, DB_USER, DB_PASS, DB) as db:
-        db.log_data_events(database_log, DB_EVENTS_TABLE)
-
     logger.info('Standardizing dataframes complete!')
     logger.info('-----------------------------------')
 
@@ -458,7 +461,6 @@ def lambda_handler(event, context):
     else:
         logger.info('No new data to process, exiting...')
         return
-
     
     standard_df = sp.gridify_df(combined_df, gdf_grid)
     logger.info('grid assiggment complete!')
@@ -467,103 +469,23 @@ def lambda_handler(event, context):
     except Exception as e:
         logger.warning('Could not concat with Study Fleet:%s', e)
         full_fleet = combined_df
-    try:
-        try:
-            logger.info('Freeing up memory...')
-            dataframes.clear()
-            # free up memory before aggregation
-            del standard_df, studyfleet, combined_df, dataframes
-            gc.collect()
-            logger.info('aggregating data to daily averages...')
-            agg_df = aggregated_data(full_fleet)
-            del full_fleet
-            gc.collect()
-            logger.info('aggregation complete!')
-        except Exception as e:
-            logger.error("Error freeing memory data: %s", e)
-            raise
+    logger.info('-----------------------------------')
+    # Save combined_df to a SQLite database
+    tmp_file = '/tmp/fishbot_intermediate.db'
+    save_to_sqlite(full_fleet, database_log, tmp_file)
+    logger.info('Combined dataframe saved to SQLite database at %s', tmp_file)
+    # Upload the SQLite database to S3
+    s3_key = f"{S3_PREFIX}/fishbot_intermediate.db"
 
-        # * create new DF of just postions for speed
+    if push_to_s3(tmp_file, BUCKET_NAME, s3_key):
+        logger.info("SQLite database successfully uploaded to S3")
+    else:
+        logger.error("Failed to upload SQLite database to S3")
+        raise Exception(f"Failed to upload {tmp_file} to {BUCKET_NAME}/{s3_key}")
+    
+    s3_archive_key = f"{S3_PREFIX}/fishbot_archive_intermediate.nc"
+    tmp_file = '/tmp/fishbot_realtime_tmp.nc'
+    fishbot_ds.to_netcdf(tmp_file, mode='w')
+    if push_to_s3(tmp_file, BUCKET_NAME, s3_archive_key):
+        logger.info("Fishbot archive data successfully uploaded to S3")
 
-        gridded_positions = agg_df[['latitude',
-                                    'longitude']].drop_duplicates().copy()
-        gridded_positions = gridded_positions.pipe(
-            sp.assign_statistical_areas).pipe(sp.find_closest_depth)
-
-        # * pipe the positions through the assignment and join back based on coordinates
-        agg_df = agg_df.merge(gridded_positions[['latitude', 'longitude', 'depth', 'stat_area']], on=[
-            'latitude', 'longitude'], how='left')
-        agg_df.drop(columns=['geometry'], inplace=True)
-    except Exception as e:
-        logger.error("Error processing data: %s", e)
-        raise
-    logger.info('Data aggregation and metadata assingment complete.')
-    logger.info('-----------------------------------------')
-    logger.info('Packing data to NetCDF...')
-    s3 = S3Connector(BUCKET_NAME, AWS_REGION)
-    try:
-        files = pack_to_netcdf(
-            agg_df, s3, prefix=S3_PREFIX, version=__version__)
-        
-    except Exception as e:
-        logger.error("Error packing data to NetCDF: %s", e)
-        raise
-    logger.info('NetCDF packing complete!')
-    logger.info('created %s nc files', len(files))
-    logger.info('-----------------------------------------')
-    logger.info('Archiving fishbot_realtime')
-    try:
-        archvie_file_size = s3.archive_fishbot(fishbot_ds, current_time,
-                           version=__version__, prefix=S3_ARCHIVE_PREFIX)
-
-        logger.info('Fishbot archive created successfully!')
-        logger.info('-----------------------------------------')
-    except Exception as e:
-        logger.error("Error archiving fishbot: %s", e)
-        raise
-    try:
-        logger.info("Pushing fishbot archive to S3")
-        archive_key = s3.get_archive_key()
-        public_url = s3.get_archive_url()
-        logger.info("Archive key: %s", public_url)
-
-    except Exception as e:
-        logger.error("Error archiving fishbot: %s", e)
-        raise
-
-    logger.info('logging the archive in the database')
-    try:
-        with DatabaseConnector(DB_HOST, DB_USER, DB_PASS, DB) as db:
-            logger.info("Logging archive to DB")
-            archive_dict = {
-                "archive_s3_key": archive_key,
-                "archive_public_url": public_url,
-                "archive_date": current_time,
-                "version": __version__,
-                "doi": "",
-                "reload_type": reload_type,
-                "file_size_mb": archvie_file_size
-            }
-            db.log_archive(archive_dict, DB_ARCHIVE_TABLE)
-            logger.info("Archive logged to DB successfully")
-    except Exception as e:
-        logger.error("Error logging archive to DB: %s", e, exc_info=True)
-        raise
-    logger.info('-----------------------------------------')
-    try:
-        logger.info('Updating fishbot_archive dataset in S3')
-        with DatabaseConnector(DB_HOST, DB_USER, DB_PASS, DB) as db:
-            archive_df = db.update_archive_record(DB_ARCHIVE_TABLE)
-        archive_file = '/tmp/fishbot_archive.csv'
-        archive_df.to_csv(archive_file, index=False)
-        s3_key = f'{S3_PREFIX}/fishbot_archive.csv'
-        with open(archive_file, 'rb') as file_obj:
-            s3.push_file_to_s3(file_obj, s3_key, content_type="text/csv")
-
-        logger.info("Archive dataset %s pushed to S3", archive_file)
-    except Exception as e:
-        logger.error("Error updating fishbot archive dataset: %s", e, exc_info=True)
-        raise
-
-    logger.info("Application complete!")
-    logger.info("=============================")

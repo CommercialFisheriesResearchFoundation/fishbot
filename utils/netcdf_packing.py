@@ -215,9 +215,9 @@ def process_group(day, group, s3_conn, prefix, version):
     s3_key = f"{prefix}/{year}/{month}/fishbot_{day}.nc"
 
     try:
-        logger.info("Dataset columns: %s", list(ds.data_vars.keys()))
+        logger.debug("Dataset columns: %s", list(ds.data_vars.keys()))
         with tempfile.NamedTemporaryFile(suffix=".nc", dir="/tmp", delete=False) as tmp:
-            ds.to_netcdf(tmp.name, mode="w", engine="scipy")
+            ds.to_netcdf(tmp.name, mode="w",engine="scipy")
 
         # Re-open the file to pass it as a file-like object to push_buffer_to_s3
         with open(tmp.name, 'rb') as f:
