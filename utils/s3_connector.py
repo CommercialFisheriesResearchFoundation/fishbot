@@ -28,10 +28,11 @@ class S3Connector:
         self.archive_url = None
         self.archive_s3_key = None
 
-    def push_file_to_s3(self, file, s3_key, content_type="application/octet-stream") -> str:
+    def push_file_to_s3(self, file, s3_key, content_type="application/octet-stream", storage_class = 'STANDARD_IA') -> str:
         """ Method to push a file object to S3 """
         try:
-            extra_args = {'ContentType': content_type}
+            extra_args = {'ContentType': content_type,
+                          'StorageClass': storage_class} 
             # logger.info("Uploading file to s3://%s/%s", self.bucket_name, s3_key)
             self.s3_client.upload_fileobj(file, self.bucket_name, s3_key, ExtraArgs=extra_args)
             # logger.debug("file uploaded to s3://%s/%s", self.bucket_name, s3_key)
@@ -62,7 +63,7 @@ class S3Connector:
 
             with open(tmp.name, 'rb') as f:
                 s3_key = f"{prefix}/fishbot_archive_{str(current_time).split('T')[0]}.nc"
-                self.push_file_to_s3(f, s3_key, content_type="application/netcdf")
+                self.push_file_to_s3(f, s3_key, content_type="application/netcdf", storage_class='GLACIER_IR')
                
         except Exception as e:
             logger.error("Failed to upload to S3: %s", e)
