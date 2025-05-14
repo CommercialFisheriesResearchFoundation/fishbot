@@ -3,6 +3,7 @@ WORKDIR ${LAMBDA_TASK_ROOT}
 
 
 COPY lambda-fetch/requirements.txt .
+COPY config/datasets.yaml .
 RUN pip install -r requirements.txt
 
 COPY utils/                  ./utils/

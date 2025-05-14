@@ -23,6 +23,7 @@ from dateutil.relativedelta import relativedelta
 from scipy.signal import medfilt
 import boto3
 import sqlite3
+import yaml
 
 # DB_USER = os.getenv('DB_USER')
 # DB_PASS = os.getenv('DB_PASS')
@@ -37,72 +38,22 @@ S3_PREFIX = os.getenv('PREFIX')
 # S3_ARCHIVE_PREFIX = os.getenv('ARCHIVE_PREFIX')
 FULL_RELOAD_FLAG = os.getenv('FULL_RELOAD_FLAG', 'False').lower() == 'true'
 
-DATASETS = {
-    "cfrf": {
-        "server": "https://erddap.ondeckdata.com/erddap/",
-        "dataset_id": ["fixed_gear_oceanography", "shelf_fleet_profiles_1m_binned", "wind_farm_profiles_1m_binned"],
-        "protocol": ["tabledap", "tabledap", "tabledap"],
-        "response": ["nc", "nc", "nc"],
-        "variables": [
-            ["time", "latitude", "longitude", "temperature",
-                "dissolved_oxygen", "tow_id"],  # for fixed_gear_oceanography
-            ["time", "latitude", "longitude", "conservative_temperature",
-                "sea_pressure", "profile_id", "absolute_salinity"],
-            ["time", "latitude", "longitude", "conservative_temperature",
-                "sea_pressure", "profile_id", "absolute_salinity"]
-        ]
-    },
-    "emolt": {
-        "server": "https://erddap.emolt.net/erddap/",
-        "dataset_id": ["eMOLT_RT", "eMOLT_RT_LOWELL"],
-        "protocol": ["tabledap", "tabledap"],
-        "response": ["nc", "nc"],
-        "constraints": {
-            "eMOLT_RT": {
-                "segment_type=": 3
-            },
-            "eMOLT_RT_LOWELL": {
-                "water_detect_perc>": 60,
-                "DO>": 0,
-                "temperature>": 0,
-                "temperature<": 27
-            }
-        },
-        "variables": [
-            ["time", "latitude", "longitude",
-                "temperature", "tow_id"],  # for eMOLT_RT
-            ["time", "latitude", "longitude", "temperature", "DO", "tow_id"]
-        ]
-    },
-    "studyfleet": {
-        "server": "",
-        "dataset_id": [],  # This will be loaded locally from a CSV file
-        "protocol": [],
-        "response": [],
-    },
-    "ecomon": {
-        "server": "https://comet.nefsc.noaa.gov/erddap/",
-        "dataset_id": ["ocdbs_v_erddap1"],
-        "protocol": ["tabledap"],
-        "response": ["nc"],
-        "constraints": {"ocdbs_v_erddap1": {
-            "GEAR_TYPE!=": 'Bottle',
-            "latitude>": 34
-        }
-        },
+def load_datasets():
+   """ function to load the datasets.yaml file from github or local"""
+   raw_url = os.getenv("DATASETS_URL",
+        "https://raw.githubusercontent.com/CommercialFisheriesResearchFoundation/fishbot/refs/heads/main/config/datasets.yaml"
+    )
+   try:
+        resp = requests.get(raw_url, timeout=5)
+        resp.raise_for_status()
+        return yaml.safe_load(resp.text)
+   except Exception as e:
+        logger.warning("Failed to load datasets.yaml from GitHub: %s", e)
 
-        "variables": [
-            ["UTC_DATETIME", "latitude", "longitude", "sea_water_temperature", "pressure_dbars",
-             "dissolved_oxygen", "sea_water_salinity", "cast_number", "cruise_id"]
-        ]
-    },
-    "archive": {
-        "server": "https://erddap.ondeckdata.com/erddap/",
-        "dataset_id": ["fishbot_realtime"],
-        "protocol": ["tabledap"],
-        "response": ["nc"]
-    }
-}
+   logger.info("Loading datasets.yaml from local file instead")
+   with open('datasets.yaml', 'r') as f:
+        # datasets file loaded to docker image as fall back, may not be current to github
+        return yaml.safe_load(f)
 
 def test_erddap_archive() -> bool:
     server = 'https://erddap.ondeckdata.com/erddap/'
@@ -365,6 +316,7 @@ def lambda_handler(event, context):
     """ main function to call all subroutines"""
     logger.info("=============================")
     logger.info("FIShBOT Application started")
+    DATASETS = load_datasets()
     if not test_erddap_archive():
         logger.error("ERDDAP dataset is not reachable. Exiting program.")
         sys.exit(1)
