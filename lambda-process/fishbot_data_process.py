@@ -1,7 +1,7 @@
 __author__ = 'Linus Stoltz | Data Manager, CFRF'
 __project_team__ = 'Linus Stoltz, Sarah Salois, George Maynard, Mike Morin'
 __doc__ = 'FIShBOT program to aggregate regional data into a standarzied daily grid'
-__version__ = '0.7'
+__version__ = '0.8'
 
 import logging
 import sys
@@ -102,6 +102,7 @@ def lambda_handler(event, context):
         full_fleet, database_log = s3.get_handoff_data(intermediate_key)
         fishbot_ds = s3.get_fishbot_archive_dataset(prefix)
         reload_type = database_log[0].get('reload_type', None) # grab the reload type from the first entry in the log
+        doi = database_log[0].get('doi', None) # grab the doi from the first entry in the log
 
     except Exception as e:
         logger.error("Error accessing handoff data from S3: %s", e)
@@ -145,7 +146,7 @@ def lambda_handler(event, context):
     logger.info('Archiving fishbot_realtime')
     try:
         archvie_file_size = s3.archive_fishbot(fishbot_ds, current_time,
-                           version=__version__, prefix=S3_ARCHIVE_PREFIX)
+                           version=__version__, prefix=S3_ARCHIVE_PREFIX, doi=doi)
 
         logger.info('Fishbot archive created successfully!')
         logger.info('-----------------------------------------')
@@ -171,7 +172,7 @@ def lambda_handler(event, context):
                 "archive_public_url": public_url,
                 "archive_date": current_time,
                 "version": __version__,
-                "doi": "",
+                "doi": doi,
                 "reload_type": reload_type,
                 "file_size_mb": archvie_file_size
             }
