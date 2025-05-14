@@ -61,7 +61,7 @@ class ZenodoConnector:
                     {
                         "name":        "Morin, Micheal",
                         "affiliation": "National Oceanic and Atmospheric Administration",
-                        # "orcid":       "0000-0000-xxxx-xxxx"
+                        "orcid":       "0009-0000-8901-0827"
                     },
                     {
                         "name":        "Salois, Sarah",

@@ -23,6 +23,8 @@ Fishbot is updated dynamically based on the calendar. If a dataset is not public
 **Annually**, all data are completely refreshed from  all available datasets.<br>
 
 The dynamic refresh interval balances making real-time data accessible quickly and optimizing storage and performance. The contributing groups to fishbot rely on a rolling QA/QC schedule and often receive data at intermittent intervals from the fleet. To capture the dynamic nature of data contributing to FISHBOT, the program itself must be dynamic to reflect perpetual QA/QC efforts. 
+### FIShBOT Archive Citation
+Each FIShBOT archive is minted a DOI for versioned citation. This is helpful if the data are incorporated into specific analysis or assessment for reproducibility. This is done automatically through the Zenodo API. The record of citations is collated in the [FIShBOT Community on Zenodo](https://zenodo.org/communities/fishbot/records?q=&l=list&p=1&s=10&sort=newest).
 
 ## See this live
 
