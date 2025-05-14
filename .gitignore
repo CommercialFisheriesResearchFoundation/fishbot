@@ -30,5 +30,6 @@ fishbot*.nc
 *.env
 *.ipynb
 *.list
+.vscode/
 
 

@@ -1,7 +1,7 @@
 __author__ = 'Linus Stoltz | Data Manager, CFRF'
 __project_team__ = 'Linus Stoltz, Sarah Salois, George Maynard, Mike Morin'
 __doc__ = 'FIShBOT program Step 1: Fetches data from ERDDAP and local files, standardizes, and saves to S3.'
-__version__ = '0.1'
+__version__ = '0.2'
 
 import logging
 import sys
@@ -11,6 +11,7 @@ logger.setLevel(logging.INFO)
 from utils.erddap_connector import ERDDAPClient
 # from utils.database_connector import DatabaseConnector
 import utils.spatial_tools as sp
+from utils.zenodo_connector import ZenodoConnector
 # from utils.netcdf_packing import pack_to_netcdf
 # from utils.s3_connector import S3Connector
 import asyncio
@@ -22,6 +23,7 @@ from dateutil.relativedelta import relativedelta
 from scipy.signal import medfilt
 import boto3
 import sqlite3
+import yaml
 
 # DB_USER = os.getenv('DB_USER')
 # DB_PASS = os.getenv('DB_PASS')
@@ -36,72 +38,22 @@ S3_PREFIX = os.getenv('PREFIX')
 # S3_ARCHIVE_PREFIX = os.getenv('ARCHIVE_PREFIX')
 FULL_RELOAD_FLAG = os.getenv('FULL_RELOAD_FLAG', 'False').lower() == 'true'
 
-DATASETS = {
-    "cfrf": {
-        "server": "https://erddap.ondeckdata.com/erddap/",
-        "dataset_id": ["fixed_gear_oceanography", "shelf_fleet_profiles_1m_binned", "wind_farm_profiles_1m_binned"],
-        "protocol": ["tabledap", "tabledap", "tabledap"],
-        "response": ["nc", "nc", "nc"],
-        "variables": [
-            ["time", "latitude", "longitude", "temperature",
-                "dissolved_oxygen", "tow_id"],  # for fixed_gear_oceanography
-            ["time", "latitude", "longitude", "conservative_temperature",
-                "sea_pressure", "profile_id", "absolute_salinity"],
-            ["time", "latitude", "longitude", "conservative_temperature",
-                "sea_pressure", "profile_id", "absolute_salinity"]
-        ]
-    },
-    "emolt": {
-        "server": "https://erddap.emolt.net/erddap/",
-        "dataset_id": ["eMOLT_RT", "eMOLT_RT_LOWELL"],
-        "protocol": ["tabledap", "tabledap"],
-        "response": ["nc", "nc"],
-        "constraints": {
-            "eMOLT_RT": {
-                "segment_type=": "Fishing"
-            },
-            "eMOLT_RT_LOWELL": {
-                "water_detect_perc>": 60,
-                "DO>": 0,
-                "temperature>": 0,
-                "temperature<": 27
-            }
-        },
-        "variables": [
-            ["time", "latitude", "longitude",
-                "temperature", "tow_id"],  # for eMOLT_RT
-            ["time", "latitude", "longitude", "temperature", "DO", "tow_id"]
-        ]
-    },
-    "studyfleet": {
-        "server": "",
-        "dataset_id": [],  # This will be loaded locally from a CSV file
-        "protocol": [],
-        "response": [],
-    },
-    "ecomon": {
-        "server": "https://comet.nefsc.noaa.gov/erddap/",
-        "dataset_id": ["ocdbs_v_erddap1"],
-        "protocol": ["tabledap"],
-        "response": ["nc"],
-        "constraints": {"ocdbs_v_erddap1": {
-            "GEAR_TYPE!=": 'Bottle',
-            "latitude>": 34
-        }
-        },
+def load_datasets():
+   """ function to load the datasets.yaml file from github or local"""
+   raw_url = os.getenv("DATASETS_URL",
+        "https://raw.githubusercontent.com/CommercialFisheriesResearchFoundation/fishbot/refs/heads/main/config/datasets.yaml"
+    )
+   try:
+        resp = requests.get(raw_url, timeout=5)
+        resp.raise_for_status()
+        return yaml.safe_load(resp.text)
+   except Exception as e:
+        logger.warning("Failed to load datasets.yaml from GitHub: %s", e)
 
-        "variables": [
-            ["UTC_DATETIME", "latitude", "longitude", "sea_water_temperature", "pressure_dbars",
-             "dissolved_oxygen", "sea_water_salinity", "cast_number", "cruise_id"]
-        ]
-    },
-    "archive": {
-        "server": "https://erddap.ondeckdata.com/erddap/",
-        "dataset_id": ["fishbot_realtime"],
-        "protocol": ["tabledap"],
-        "response": ["nc"]
-    }
-}
+   logger.info("Loading datasets.yaml from local file instead")
+   with open('datasets.yaml', 'r') as f:
+        # datasets file loaded to docker image as fall back, may not be current to github
+        return yaml.safe_load(f)
 
 def test_erddap_archive() -> bool:
     server = 'https://erddap.ondeckdata.com/erddap/'
@@ -237,7 +189,6 @@ def standardize_df(df, dataset_id) -> pd.DataFrame:
         logger.warning('No processing identified for %s', dataset_id)
         return pd.DataFrame(columns=keepers)
 
-
 def load_local_studyfleet(gdf_grid, last_runtime) -> pd.DataFrame:
     """ Side load the study fleet data from a local CSV file"""
     logger.info("Loading local studyfleet data")
@@ -264,7 +215,6 @@ def load_local_studyfleet(gdf_grid, last_runtime) -> pd.DataFrame:
         raise
     logger.info("Local studyfleet data loaded")
     return study_fleet
-
 
 def determine_reload_schedule() -> tuple:
     """Determine the reload schedule based on the current date and return query time"""
@@ -304,7 +254,7 @@ def determine_reload_schedule() -> tuple:
         logger.error("Error determining reload schedule: %s", e)
         return None, None
     
-def save_to_sqlite(df, database_log, db_name):
+def save_to_sqlite(df, database_log, db_name, doi) -> None:
     """
     Save the combined dataframe and database log to SQLite tables in one database.
 
@@ -331,6 +281,7 @@ def save_to_sqlite(df, database_log, db_name):
 
         # Save the database log to a separate table
         db_log_df = pd.DataFrame(database_log)
+        db_log_df['doi'] = doi
         db_log_df.to_sql('database_log', conn, if_exists='replace', index=False)
         logger.info('Database log saved to SQLite database at %s', db_name)
 
@@ -340,7 +291,7 @@ def save_to_sqlite(df, database_log, db_name):
         # Close the database connection
         conn.close()
 
-def push_to_s3(file_path, bucket_name, s3_key):
+def push_to_s3(file_path, bucket_name, s3_key) -> bool:
     """
     Push a single file to an S3 bucket.
 
@@ -360,12 +311,12 @@ def push_to_s3(file_path, bucket_name, s3_key):
     except Exception as e:
         logger.error("Error uploading file to S3: %s", e)
         return False
-    
 
 def lambda_handler(event, context):
     """ main function to call all subroutines"""
     logger.info("=============================")
     logger.info("FIShBOT Application started")
+    DATASETS = load_datasets()
     if not test_erddap_archive():
         logger.error("ERDDAP dataset is not reachable. Exiting program.")
         sys.exit(1)
@@ -468,12 +419,32 @@ def lambda_handler(event, context):
         full_fleet = pd.concat([studyfleet, standard_df], ignore_index=True)
     except Exception as e:
         logger.warning('Could not concat with Study Fleet:%s', e)
-        full_fleet = combined_df
+        full_fleet = standard_df
     logger.info('-----------------------------------')
+    tmp_file_nc = f"/tmp/fishbot_archive_{str(current_time).split('T')[0]}.nc"
+    try:
+        logger.info('Pushing archive to Zenodo...')
+        fishbot_ds.to_netcdf(tmp_file_nc, mode='w')
+        zc = ZenodoConnector(tmp_file_nc)
+        zc.create_deposition()
+        zc.upload_file()
+        zc.add_metadata()
+        zc.publish()
+        doi = zc.get_doi()
+        logger.info("Fishbot archive data successfully pushed to Zenodo with DOI: %s", doi)
+    except Exception as e:
+        logger.error("Error pushing archive to Zenodo: %s", e)
+        logger.warning("Fishbot archive data not pushed to Zenodo, but will be uploaded to S3")
+        doi = None
+    logger.info('------------------------------------')
     # Save combined_df to a SQLite database
     tmp_file = '/tmp/fishbot_intermediate.db'
-    save_to_sqlite(full_fleet, database_log, tmp_file)
-    logger.info('Combined dataframe saved to SQLite database at %s', tmp_file)
+    try:
+        save_to_sqlite(full_fleet, database_log, tmp_file, doi)
+        logger.info('Combined dataframe saved to SQLite database at %s', tmp_file)
+    except Exception as e:
+        logger.error('Error saving data to SQLite: %s', e)
+        raise e
     # Upload the SQLite database to S3
     s3_key = f"{S3_PREFIX}/fishbot_intermediate.db"
 
@@ -483,9 +454,13 @@ def lambda_handler(event, context):
         logger.error("Failed to upload SQLite database to S3")
         raise Exception(f"Failed to upload {tmp_file} to {BUCKET_NAME}/{s3_key}")
     
+    
     s3_archive_key = f"{S3_PREFIX}/fishbot_archive_intermediate.nc"
-    tmp_file = '/tmp/fishbot_realtime_tmp.nc'
-    fishbot_ds.to_netcdf(tmp_file, mode='w')
-    if push_to_s3(tmp_file, BUCKET_NAME, s3_archive_key):
-        logger.info("Fishbot archive data successfully uploaded to S3")
+    try:
+        
+        if push_to_s3(tmp_file_nc, BUCKET_NAME, s3_archive_key):
+            logger.info("Fishbot archive data successfully uploaded to S3")
+    except Exception as e:
+        logger.error("Failed to upload fishbot archive data to S3: %s", e)
+        raise Exception(f"Failed to upload {tmp_file_nc} to {BUCKET_NAME}/{s3_archive_key}: {e}")
 

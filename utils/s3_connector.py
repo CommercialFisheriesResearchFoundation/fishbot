@@ -44,7 +44,7 @@ class S3Connector:
             logger.error("Failed to upload file: %s", e)
             raise
 
-    def archive_fishbot(self,ds, current_time, version, prefix='archive')-> float:
+    def archive_fishbot(self,ds, current_time, version, prefix='archive', doi='')-> float:
         # server = 'https://erddap.ondeckdata.com/erddap/'
         if not isinstance(ds, xr.Dataset):
             raise TypeError(f"Expected ds to be xarray Dataset, got {type(ds).__name__}")
@@ -55,6 +55,7 @@ class S3Connector:
         
         ds.attrs['version'] = version
         ds.attrs['archive_time'] = current_time
+        ds.attrs['doi'] = doi
 
         try:
             with tempfile.NamedTemporaryFile(suffix=".nc", dir="/tmp", delete=False) as tmp:
@@ -101,6 +102,7 @@ class S3Connector:
                 rows = cursor.fetchall()
                 columns = [description[0] for description in cursor.description]
                 data_dict = [dict(zip(columns, row)) for row in rows]
+
 
                 conn.close()
 
