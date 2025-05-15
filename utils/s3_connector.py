@@ -55,7 +55,9 @@ class S3Connector:
         
         ds.attrs['version'] = version
         ds.attrs['archive_time'] = current_time
-        ds.attrs['doi'] = doi
+        if doi != '':
+            ds.attrs['doi'] = doi
+            ds.attrs['citation_url'] = f"https://zenodo.org/records/{doi.split('.')[-1]}"
 
         try:
             with tempfile.NamedTemporaryFile(suffix=".nc", dir="/tmp", delete=False) as tmp:

@@ -173,6 +173,7 @@ def lambda_handler(event, context):
                 "archive_date": current_time,
                 "version": __version__,
                 "doi": doi,
+                "citation_url": f"https://zenodo.org/records/{doi.split('.')[-1]}",
                 "reload_type": reload_type,
                 "file_size_mb": archvie_file_size
             }
