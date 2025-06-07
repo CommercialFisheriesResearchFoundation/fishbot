@@ -1,26 +1,26 @@
 __author__ = 'Linus Stoltz | Data Manager, CFRF'
 __project_team__ = 'Linus Stoltz, Sarah Salois, George Maynard, Mike Morin'
 __doc__ = 'FIShBOT program to aggregate regional data into a standarzied daily grid'
-__version__ = '0.8'
+__version__ = '0.9'
 
 import logging
-import sys
+# import sys
 # Configure logging before any other imports
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
-from utils.erddap_connector import ERDDAPClient
+# from utils.erddap_connector import ERDDAPClient
 from utils.database_connector import DatabaseConnector
 import utils.spatial_tools as sp
 from utils.netcdf_packing import pack_to_netcdf
 from utils.s3_connector import S3Connector
-import asyncio
+# import asyncio
 import pandas as pd
-import requests
+# import requests
 import os
 from datetime import datetime, timezone
-from dateutil.relativedelta import relativedelta
-from scipy.signal import medfilt
-import gc
+# from dateutil.relativedelta import relativedelta
+# from scipy.signal import medfilt
+# import gc
 
 DB_USER = os.getenv('DB_USER')
 DB_PASS = os.getenv('DB_PASS')
@@ -48,7 +48,9 @@ def aggregated_data(df) -> pd.DataFrame:
             'id': 'first',
             'latitude': 'first',
             'longitude': 'first',
-            'fishery_dependent': 'first'
+            'fishery_dependent': 'first',
+            'stat_area': 'first',
+            'depth': 'first' 
         }
 
         # Check if 'dissolved_oxygen' exists in the dataframe
@@ -78,7 +80,9 @@ def aggregated_data(df) -> pd.DataFrame:
                                   'id_first': 'grid_id',
                                   'latitude_first': 'latitude',
                                   'longitude_first': 'longitude',
-                                  'fishery_dependent_first':'fishery_dependent'}, inplace=True)
+                                  'fishery_dependent_first':'fishery_dependent',
+                                  'stat_area_first':'stat_area',
+                                  'depth_first':'depth'}, inplace=True)
 
     df_aggregated['data_provider'] = df_aggregated['data_provider'].astype(
         str).str.replace(r"[\[\]']", "", regex=True)
@@ -116,17 +120,6 @@ def lambda_handler(event, context):
         logger.info('aggregating data to daily averages...')
         agg_df = aggregated_data(full_fleet)
 
-        # * create new DF of just postions for speed
-
-        gridded_positions = agg_df[['latitude',
-                                    'longitude']].drop_duplicates().copy()
-        gridded_positions = gridded_positions.pipe(
-            sp.assign_statistical_areas).pipe(sp.find_closest_depth)
-
-        # * pipe the positions through the assignment and join back based on coordinates
-        agg_df = agg_df.merge(gridded_positions[['latitude', 'longitude', 'depth', 'stat_area']], on=[
-            'latitude', 'longitude'], how='left')
-        # agg_df.drop(columns=['geometry'], inplace=True)
     except Exception as e:
         logger.error("Error processing data: %s", e)
         raise

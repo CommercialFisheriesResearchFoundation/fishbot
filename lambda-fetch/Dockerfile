@@ -7,10 +7,10 @@ COPY config/datasets.yaml .
 RUN pip install -r requirements.txt
 
 COPY utils/                  ./utils/
-COPY botgrid/                ./botgrid/
+COPY botgrid/botgrid.gpkg    ./botgrid/botgrid.gpkg
 COPY data/local_data/        ./data/local_data/
-COPY data/bathymetry/        ./data/bathymetry/
-COPY data/statistical_areas/ ./data/statistical_areas/
+# COPY data/bathymetry/        ./data/bathymetry/
+# COPY data/statistical_areas/ ./data/statistical_areas/
 
 COPY lambda-fetch/fishbot_data_pull.py .
 

@@ -1,3 +1,4 @@
+# import io
 import os
 import xarray as xr
 import pandas as pd
@@ -8,9 +9,8 @@ from concurrent.futures import ThreadPoolExecutor
 import tempfile
 logger = logging.getLogger(__name__)
 
-
 def set_variable_attrs(var_name) -> dict:
-    """ Dictionary storing the metadata descritptions"""
+    """Dictionary storing the metadata descriptions."""
     attrs = {
         "temperature": {
             "units": "degrees_Celsius",
@@ -135,51 +135,8 @@ def set_variable_attrs(var_name) -> dict:
     }
     return attrs.get(var_name, {})
 
-def process_group(day, group, s3_conn, prefix, version):
-    """Process a single group, write NetCDF, and  upload to S3."""
-    # Check argument types
-    if not isinstance(day, int):
-        raise TypeError(f"Expected 'day' to be int, got {type(day).__name__}")
-    if not isinstance(group, pd.DataFrame):
-        raise TypeError(f"Expected 'group' to be pandas DataFrame, got {type(group).__name__}")
-    if not isinstance(s3_conn, S3Connector):
-        raise TypeError(f"Expected 's3_conn' to be S3Connector, got {type(s3_conn).__name__}")
-    if not isinstance(prefix, str):
-        raise TypeError(f"Expected 'prefix' to be str, got {type(prefix).__name__}")
-    if not isinstance(version, str):
-        raise TypeError(f"Expected 'version' to be str, got {type(version).__name__}")
-
-    # Create dataset
-    exclude_vars = {"time", "latitude", "longitude"}
-    data_vars = {
-        var: ("time", group[var].values)
-        for var in group.columns if var not in exclude_vars
-    }
-
-    ds = xr.Dataset(
-        data_vars,
-        coords={
-            "time": ("time", [day] * len(group)),
-            "latitude": ("time", group["latitude"].values),
-            "longitude": ("time", group["longitude"].values),
-        },
-    )
-    ds.encoding["unlimited_dims"] = {"time"}
-
-    # Set attributes
-    for var in ds.data_vars:
-        ds[var].attrs = set_variable_attrs(var)
-    for coord in ds.coords:
-        ds[coord].attrs = set_variable_attrs(coord)
-
-    ds.attrs.update({
-        "title": "Fishing Industry Shared Bottom Oceanographic Timeseries",
-        "description": "Gridded daily observations of demersal oceanographic observations and related metrics.",
-        "institution": "CFRF | NOAA NEFSC",
-        "version": version,
-    })
-
-    # Cast variables
+def _cast_dtypes(df: pd.DataFrame) -> pd.DataFrame:
+    """Cast columns to efficient dtypes before grouping."""
     cast_map = {
         "temperature": "float32",
         "temperature_std": "float32",
@@ -205,12 +162,49 @@ def process_group(day, group, s3_conn, prefix, version):
         "data_provider": "S32",
         "fishery_dependent": "uint8",
     }
-    for var, dtype in cast_map.items():
-        if var in ds:
-            ds[var] = ds[var].astype(dtype)
+    for col, dtype in cast_map.items():
+        if col in df.columns:
+            try:
+                df[col] = df[col].astype(dtype)
+            except Exception as e:
+                logger.warning(f"Could not cast column {col} to {dtype}: {e}")
+    return df
+
+def process_group(day, group, s3_conn, prefix, version):
+    """Process a single group, write NetCDF, and upload to S3."""
+    # Create dataset
+    exclude_vars = {"time", "latitude", "longitude"}
+    data_vars = {
+        var: ("time", group[var].values)
+        for var in group.columns if var not in exclude_vars
+    }
+    ds = xr.Dataset(
+        data_vars,
+        coords={
+            "time": ("time", [day] * len(group)),
+            "latitude": ("time", group["latitude"].values),
+            "longitude": ("time", group["longitude"].values),
+        },
+    )
+    ds.encoding["unlimited_dims"] = {"time"}
+
+    # Set attributes
+    for var in ds.data_vars:
+        ds[var].attrs = set_variable_attrs(var)
+    for coord in ds.coords:
+        ds[coord].attrs = set_variable_attrs(coord)
+    ds.attrs.update({
+        "title": "Fishing Industry Shared Bottom Oceanographic Timeseries",
+        "description": "Gridded daily observations of demersal oceanographic observations and related metrics.",
+        "institution": "CFRF | NOAA NEFSC",
+        "version": version,
+    })
+
+    # Set up encoding for compression
+    # encoding = {var: {"zlib": True, "complevel": 4} for var in ds.data_vars}
 
     # Output path setup
-    date = datetime(1970, 1, 1) + timedelta(days=day)
+    date = datetime(1970, 1, 1) + timedelta(days=int(day))
     year, month = date.year, date.month
     s3_key = f"{prefix}/{year}/{month}/fishbot_{day}.nc"
 
@@ -219,7 +213,6 @@ def process_group(day, group, s3_conn, prefix, version):
         with tempfile.NamedTemporaryFile(suffix=".nc", dir="/tmp", delete=False) as tmp:
             ds.to_netcdf(tmp.name, mode="w",engine="scipy")
 
-        # Re-open the file to pass it as a file-like object to push_buffer_to_s3
         with open(tmp.name, 'rb') as f:
             s3_conn.push_file_to_s3(f, s3_key, content_type="application/netcdf")
 
@@ -234,10 +227,8 @@ def process_group(day, group, s3_conn, prefix, version):
 
     return s3_key
 
-
-def pack_to_netcdf(df_out, s3_conn, prefix='development', version="0.1") -> list:
-    """Tool to create daily nc files for output of the entire grid and upload to S3."""
-    # Validate arguments
+def pack_to_netcdf(df_out, s3_conn, prefix='development', version="0.1", max_workers=None) -> list:
+    """Create daily NetCDF files for output of the entire grid and upload to S3."""
     if not isinstance(df_out, pd.DataFrame):
         raise TypeError(f"Expected 'df_out' to be pandas DataFrame, got {type(df_out).__name__}")
     if not isinstance(s3_conn, S3Connector):
@@ -246,7 +237,7 @@ def pack_to_netcdf(df_out, s3_conn, prefix='development', version="0.1") -> list
         raise TypeError(f"Expected 'prefix' to be str, got {type(prefix).__name__}")
     if not isinstance(version, str):
         raise TypeError(f"Expected 'version' to be str, got {type(version).__name__}")
-    
+
     try:
         df_out['time'] = pd.to_datetime(df_out['time'])
         epoch = datetime(1970, 1, 1)
@@ -257,16 +248,22 @@ def pack_to_netcdf(df_out, s3_conn, prefix='development', version="0.1") -> list
 
     try:
         logger.info('filtering unreasonable positions and values...')
+        logger.info('initial data size: %d', len(df_out))
         df_out = df_out[(df_out['depth'] < 900) & (df_out['depth'] > 1)]
+        logger.info('depth filter data size: %d', len(df_out))
         df_out = df_out[(df_out['temperature'] > 0) & (df_out['temperature'] < 27)]
+        logger.info('gross T range filter data size: %d', len(df_out))
     except Exception as e:
         logger.error('could not filter out invalid data: %s', e)
         raise
 
+    # Cast dtypes before grouping for memory and speed
+    df_out = _cast_dtypes(df_out)
+
     s3_keys = []
     grouped = df_out.groupby("time")
 
-    with ThreadPoolExecutor() as executor:
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = [
             executor.submit(process_group, day, group, s3_conn, prefix, version)
             for day, group in grouped

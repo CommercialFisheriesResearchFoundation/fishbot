@@ -1,26 +1,9 @@
-# History files
-.Rhistory
-.Rapp.history
-.Rproj.user
-
-# Session Data files
-.RData
-
-# User-specific files
-.Ruserdata
-
-# RStudio files
-.Rproj.user/
-
-# local folders
-/figures
 
 # python local testing
 python_tools/
-
-
-
+utils/__pycache__/
 data/local_data/
+data/studyfleet_raw/
 env/
 
 *.png

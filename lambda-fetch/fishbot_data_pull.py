@@ -1,7 +1,7 @@
 __author__ = 'Linus Stoltz | Data Manager, CFRF'
 __project_team__ = 'Linus Stoltz, Sarah Salois, George Maynard, Mike Morin'
 __doc__ = 'FIShBOT program Step 1: Fetches data from ERDDAP and local files, standardizes, and saves to S3.'
-__version__ = '0.8'
+__version__ = '0.9'
 
 import logging
 import sys
@@ -87,10 +87,18 @@ def standardize_df(df, dataset_id) -> pd.DataFrame:
         try:
             # eMOLT data just bottom temperature
             df['time'] = pd.to_datetime(df['time'])
-            filt = ['time', 'latitude', 'longitude', 'temperature']
-
-            df_re = df.groupby('tow_id')[filt].apply(
-                lambda x: x.set_index('time').resample('h').mean().reset_index()).reset_index(drop=True)
+            filt = ['latitude', 'longitude', 'temperature']
+            df = df.sort_values(['tow_id', 'time'])
+            # Set index for efficient resampling - optimizer
+            df = df.set_index(['tow_id', 'time'])
+            # Resample and aggregate
+            df_re = (
+                df[filt]
+                .groupby('tow_id')
+                .resample('h', level='time')
+                .mean()
+                .reset_index()
+            )
 
             df_re.loc[:, 'data_provider'] = 'eMOLT'
             df_re.loc[:, 'fishery_dependent'] = 1
@@ -107,20 +115,34 @@ def standardize_df(df, dataset_id) -> pd.DataFrame:
             df['time'] = pd.to_datetime(df['time'])
             df.reset_index(inplace=True)
 
-            df['flag'] = df.groupby('tow_id')['DO'].transform(
-                lambda x: (x - x.mean()).abs() > 3 * x.std())
-            df = df.loc[~df['flag']]
+            grouped = df.groupby('tow_id')['DO']
+            mean = grouped.transform('mean')
+            std = grouped.transform('std')
+            df['flag'] = (df['DO'] - mean).abs() > 3 * std
             # find short tow_ids
             df = df[df.groupby('tow_id')['tow_id'].transform('count') >= 10]
 
             df['DO_filtered'] = df.groupby('tow_id')['DO'].transform(
                 lambda x: medfilt(x, kernel_size=5))
 
-            filt = ['time', 'latitude', 'longitude', 'temperature',
+            filt = ['latitude', 'longitude', 'temperature',
                     'DO_filtered']
+            
+            df = df.sort_values(['tow_id', 'time'])
+            # Set index for efficient resampling - optimizer
+            df = df.set_index(['tow_id', 'time'])
 
-            df_re = df.groupby('tow_id')[filt].apply(
-                lambda x: x.set_index('time').resample('h').mean().reset_index()).reset_index(drop=True)
+            # Resample and aggregate
+            df_re = (
+                df[filt]
+                .groupby('tow_id')
+                .resample('h', level='time')
+                .mean()
+                .reset_index()
+            )
+            # old slow way to aggreagate
+            # df_re = df.groupby('tow_id')[filt].apply(
+            #     lambda x: x.set_index('time').resample('h').mean().reset_index()).reset_index(drop=True)
 
             df_re.rename(
                 columns={'DO_filtered': 'dissolved_oxygen'}, inplace=True)
@@ -160,9 +182,11 @@ def standardize_df(df, dataset_id) -> pd.DataFrame:
 
             df['time'] = pd.to_datetime(df['time'])
             df['time'] = df['time'].dt.tz_localize(None)
-            df['flag'] = df.groupby('tow_id')['dissolved_oxygen'].transform(
-                lambda x: (x - x.mean()).abs() > 3 * x.std())
-            df = df.loc[~df['flag']]
+            
+            grouped = df.groupby('tow_id')['dissolved_oxygen']
+            mean = grouped.transform('mean')
+            std = grouped.transform('std')
+            df['flag'] = (df['DO'] - mean).abs() > 3 * std
             df.loc[:, 'data_provider'] = 'CFRF'
             df.loc[:, 'fishery_dependent'] = 1
 
@@ -195,15 +219,12 @@ def load_local_studyfleet(gdf_grid, last_runtime) -> pd.DataFrame:
     try:
         # need to change the location
         study_fleet = pd.read_csv(
-            'data/local_data/SF_7KM_BottomTempData_AllData.csv')
-        study_fleet['OBSERVATION_DATE'] = pd.to_datetime(
-            study_fleet['OBSERVATION_DATE'], format='%d-%b-%y %H:%M:%S')
-        study_fleet.rename(columns={
-                           'OBSERVATION_DATE': 'time', 'GRID_ID': 'id', 'TEMP': 'temperature'}, inplace=True)
+            'data/local_data/study_fleet_data_processed.csv')
+        study_fleet['time'] = pd.to_datetime(study_fleet['time'])
+
         study_fleet = study_fleet.merge(
-            gdf_grid[['id', 'geometry', 'centroid']], on='id', how='left')
-        study_fleet.loc[:, 'data_provider'] = 'StudyFleet'
-        study_fleet.loc[:, 'fishery_dependent'] = 1
+            gdf_grid[['id', 'geometry','stat_area','depth']], on='id', how='left')
+
         study_fleet = study_fleet[study_fleet['time'] > pd.to_datetime(
             last_runtime).replace(tzinfo=None)]
         if study_fleet.empty:
@@ -264,11 +285,7 @@ def save_to_sqlite(df, database_log, db_name, doi) -> None:
         db_name (str): The name of the SQLite database file.
     """
     df.dropna(subset=['id'], inplace=True)
-    df['latitude'] = df['centroid'].apply(
-        lambda point: point.y).astype(float)
-    df['longitude'] = df['centroid'].apply(
-        lambda point: point.x).astype(float)
-    df = df.drop(columns=['centroid','geometry'])
+    df = df.drop(columns=['geometry'])
     for col in df.columns:
         logger.info('column %s has type %s', col, df[col].dtype)
     try:
@@ -413,6 +430,22 @@ def lambda_handler(event, context):
         logger.info('No new data to process, exiting...')
         return
     
+    # Save combined_df to a CSV file and upload to S3
+    # tmp_csv_file = '/tmp/fishbot_combined.csv'
+    # try:
+    #     combined_df.to_csv(tmp_csv_file, index=False)
+    #     logger.info('Combined dataframe saved to CSV at %s', tmp_csv_file)
+    # except Exception as e:
+    #     logger.error('Error saving combined dataframe to CSV: %s', e)
+    #     raise e
+
+    # s3_csv_key = f"{S3_PREFIX}/TEST_fishbot_combined.csv"
+    # if push_to_s3(tmp_csv_file, BUCKET_NAME, s3_csv_key):
+    #     logger.info("Combined CSV successfully uploaded to S3")
+    # else:
+    #     logger.error("Failed to upload combined CSV to S3")
+    #     raise Exception(f"Failed to upload {tmp_csv_file} to {BUCKET_NAME}/{s3_csv_key}")
+    # return
     standard_df = sp.gridify_df(combined_df, gdf_grid)
     logger.info('grid assiggment complete!')
     try:
@@ -431,6 +464,7 @@ def lambda_handler(event, context):
         zc.add_metadata()
         zc.publish()
         doi = zc.get_doi()
+        # doi = 'ipsum-doi-placeholder'  #! TESTING
         logger.info("Fishbot archive data successfully pushed to Zenodo with DOI: %s", doi)
     except Exception as e:
         logger.error("Error pushing archive to Zenodo: %s", e)
