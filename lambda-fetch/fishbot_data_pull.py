@@ -132,7 +132,7 @@ def standardize_df(df, dataset_id) -> pd.DataFrame:
             # Set index for efficient resampling - optimizer
             df = df.set_index(['tow_id', 'time'])
 
-            # Resample and aggregate
+            # hourly average
             df_re = (
                 df[filt]
                 .groupby('tow_id')
@@ -186,7 +186,7 @@ def standardize_df(df, dataset_id) -> pd.DataFrame:
             grouped = df.groupby('tow_id')['dissolved_oxygen']
             mean = grouped.transform('mean')
             std = grouped.transform('std')
-            df['flag'] = (df['DO'] - mean).abs() > 3 * std
+            df['flag'] = (df['dissolved_oxygen'] - mean).abs() > 3 * std
             df.loc[:, 'data_provider'] = 'CFRF'
             df.loc[:, 'fishery_dependent'] = 1
 
