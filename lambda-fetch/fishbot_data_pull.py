@@ -430,22 +430,6 @@ def lambda_handler(event, context):
         logger.info('No new data to process, exiting...')
         return
     
-    # Save combined_df to a CSV file and upload to S3
-    # tmp_csv_file = '/tmp/fishbot_combined.csv'
-    # try:
-    #     combined_df.to_csv(tmp_csv_file, index=False)
-    #     logger.info('Combined dataframe saved to CSV at %s', tmp_csv_file)
-    # except Exception as e:
-    #     logger.error('Error saving combined dataframe to CSV: %s', e)
-    #     raise e
-
-    # s3_csv_key = f"{S3_PREFIX}/TEST_fishbot_combined.csv"
-    # if push_to_s3(tmp_csv_file, BUCKET_NAME, s3_csv_key):
-    #     logger.info("Combined CSV successfully uploaded to S3")
-    # else:
-    #     logger.error("Failed to upload combined CSV to S3")
-    #     raise Exception(f"Failed to upload {tmp_csv_file} to {BUCKET_NAME}/{s3_csv_key}")
-    # return
     standard_df = sp.gridify_df(combined_df, gdf_grid)
     logger.info('grid assiggment complete!')
     try:
