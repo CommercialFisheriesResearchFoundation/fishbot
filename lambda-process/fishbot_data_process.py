@@ -160,13 +160,17 @@ def lambda_handler(event, context):
     try:
         with DatabaseConnector(DB_HOST, DB_USER, DB_PASS, DB) as db:
             logger.info("Logging archive to DB")
+            if isinstance(doi, str):
+                citation_url = f"https://zenodo.org/records/{doi.split('.')[-1]}"
+            else:
+                citation_url = None
             archive_dict = {
                 "archive_s3_key": archive_key,
                 "archive_public_url": public_url,
                 "archive_date": current_time,
                 "version": __version__,
                 "doi": doi,
-                "citation_url": f"https://zenodo.org/records/{doi.split('.')[-1]}",
+                "citation_url": citation_url,
                 "reload_type": reload_type,
                 "file_size_mb": archvie_file_size
             }
