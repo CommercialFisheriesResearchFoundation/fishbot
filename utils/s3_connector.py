@@ -55,9 +55,14 @@ class S3Connector:
         
         ds.attrs['version'] = version
         ds.attrs['archive_time'] = current_time
-        if doi != '':
+        if isinstance(doi, str):
             ds.attrs['doi'] = doi
             ds.attrs['citation_url'] = f"https://zenodo.org/records/{doi.split('.')[-1]}"
+        elif doi is None:
+            ds.attrs['doi'] = ''
+            ds.attrs['citation_url'] = ''
+        else:
+            raise TypeError(f"Expected 'doi' to be str or None, got {type(doi).__name__}")
 
         try:
             with tempfile.NamedTemporaryFile(suffix=".nc", dir="/tmp", delete=False) as tmp:
