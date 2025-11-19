@@ -1,7 +1,7 @@
 __author__ = 'Linus Stoltz | Data Manager, CFRF'
 __project_team__ = 'Linus Stoltz, Sarah Salois, George Maynard, Mike Morin'
 __doc__ = 'FIShBOT program Step 1: Fetches data from ERDDAP and local files, standardizes, and saves to S3.'
-__version__ = '0.9'
+__version__ = '0.9.2'
 
 import logging
 import sys
@@ -114,11 +114,14 @@ def standardize_df(df, dataset_id) -> pd.DataFrame:
         try:
             df['time'] = pd.to_datetime(df['time'])
             df.reset_index(inplace=True)
+            df = df[df['DO'] > 0]
 
             grouped = df.groupby('tow_id')['DO']
             mean = grouped.transform('mean')
             std = grouped.transform('std')
             df['flag'] = (df['DO'] - mean).abs() > 3 * std
+            df = df[~df['flag']]
+            
             # find short tow_ids
             df = df[df.groupby('tow_id')['tow_id'].transform('count') >= 10]
 
@@ -187,6 +190,7 @@ def standardize_df(df, dataset_id) -> pd.DataFrame:
             mean = grouped.transform('mean')
             std = grouped.transform('std')
             df['flag'] = (df['dissolved_oxygen'] - mean).abs() > 3 * std
+            df = df[~df['flag']]
             df.loc[:, 'data_provider'] = 'CFRF'
             df.loc[:, 'fishery_dependent'] = 1
 
