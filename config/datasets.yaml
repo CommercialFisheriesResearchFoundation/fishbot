@@ -55,7 +55,8 @@
         "response": ["nc"],
         "constraints": {"ocdbs_v_erddap1": {
             "GEAR_TYPE!=": 'Bottle',
-            "latitude>": 34
+            "latitude>": 34,
+            "dissolved_oxygen>": 0
         }
         },
 

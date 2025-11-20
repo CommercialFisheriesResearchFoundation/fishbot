@@ -5,15 +5,11 @@ __version__ = '0.9.2'
 
 import logging
 import sys
-# Configure logging before any other imports
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 from utils.erddap_connector import ERDDAPClient
-# from utils.database_connector import DatabaseConnector
 import utils.spatial_tools as sp
 from utils.zenodo_connector import ZenodoConnector
-# from utils.netcdf_packing import pack_to_netcdf
-# from utils.s3_connector import S3Connector
 import asyncio
 import pandas as pd
 import requests
@@ -25,17 +21,9 @@ import boto3
 import sqlite3
 import yaml
 
-# DB_USER = os.getenv('DB_USER')
-# DB_PASS = os.getenv('DB_PASS')
-# DB_HOST = os.getenv('DB_HOST')
-# DB = os.getenv('DB')
-# DB_TABLE = os.getenv('DB_TABLE')
-# DB_ARCHIVE_TABLE = os.getenv('DB_ARCHIVE_TABLE')
-# DB_EVENTS_TABLE = os.getenv('DB_EVENTS_TABLE')
 BUCKET_NAME = os.getenv('BUCKET_NAME')
 AWS_REGION = os.getenv('REGION')
 S3_PREFIX = os.getenv('PREFIX')
-# S3_ARCHIVE_PREFIX = os.getenv('ARCHIVE_PREFIX')
 FULL_RELOAD_FLAG = os.getenv('FULL_RELOAD_FLAG', 'False').lower() == 'true'
 
 def load_datasets():
