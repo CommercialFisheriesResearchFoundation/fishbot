@@ -4,23 +4,15 @@ __doc__ = 'FIShBOT program to aggregate regional data into a standarzied daily g
 __version__ = '0.9'
 
 import logging
-# import sys
-# Configure logging before any other imports
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
-# from utils.erddap_connector import ERDDAPClient
 from utils.database_connector import DatabaseConnector
 import utils.spatial_tools as sp
 from utils.netcdf_packing import pack_to_netcdf
 from utils.s3_connector import S3Connector
-# import asyncio
 import pandas as pd
-# import requests
 import os
 from datetime import datetime, timezone
-# from dateutil.relativedelta import relativedelta
-# from scipy.signal import medfilt
-# import gc
 
 DB_USER = os.getenv('DB_USER')
 DB_PASS = os.getenv('DB_PASS')

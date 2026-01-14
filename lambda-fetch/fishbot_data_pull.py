@@ -1,7 +1,7 @@
 __author__ = 'Linus Stoltz | Data Manager, CFRF'
 __project_team__ = 'Linus Stoltz, Sarah Salois, George Maynard, Mike Morin'
 __doc__ = 'FIShBOT program Step 1: Fetches data from ERDDAP and local files, standardizes, and saves to S3.'
-__version__ = '0.9.2'
+__version__ = '0.9.5'
 
 import logging
 import sys
@@ -170,7 +170,6 @@ def standardize_df(df, dataset_id) -> pd.DataFrame:
 
     elif dataset_id == 'fixed_gear_oceanography':
         try:
-
             df['time'] = pd.to_datetime(df['time'])
             df['time'] = df['time'].dt.tz_localize(None)
             
@@ -187,9 +186,30 @@ def standardize_df(df, dataset_id) -> pd.DataFrame:
         except Exception as e:
             logger.error("error processing %s: %s", dataset_id, e)
             # return an empty dataframe if processing fails
-
             return pd.DataFrame(columns=keepers)
+        
+    elif dataset_id == 'wind_farm_acoustic_receivers':
+        try:
+            df['time'] = pd.to_datetime(df['time'])
+            df.loc[:, 'data_provider'] = 'CFRF'
+            df.loc[:, 'fishery_dependent'] = 0
 
+            existing_columns = [col for col in keepers if col in df.columns]
+            return df[existing_columns]
+        except Exception as e:
+            logger.error("error processing %s: %s", dataset_id, e)
+            # return an empty dataframe if processing fails
+            return pd.DataFrame(columns=keepers)
+    
+    elif dataset_id =='oleanderXbt':
+        df['time'] = pd.to_datetime(df['time'])
+        df['profile_id'] = df['cruise_num'].astype(str) + '_' + df['profile_number'].astype(str)
+        df_re = df.loc[df.groupby('profile_id')['depth'].idxmax()]
+        df_re.loc[:, 'data_provider'] = 'Oleander'
+        df_re.loc[:, 'fishery_dependent'] = 0
+        existing_columns = [col for col in keepers if col in df_re.columns]
+        return df_re[existing_columns]
+    
     elif dataset_id == 'ocdbs_v_erddap1':
         df.rename(columns={'UTC_DATETIME': 'time',
                            'sea_water_temperature': 'temperature',
@@ -228,6 +248,30 @@ def load_local_studyfleet(gdf_grid, last_runtime) -> pd.DataFrame:
         raise
     logger.info("Local studyfleet data loaded")
     return study_fleet
+
+def load_local_gmgi(gdf_grid, last_runtime) -> pd.DataFrame:
+    """ Side load the GMGI data from a local CSV file"""
+    logger.info("Loading local GMGI data")
+    try:
+        # need to change the location
+        gmgi = pd.read_csv(
+            'data/local_data/gmgi_sbnms_processed.csv')
+        gmgi['time'] = pd.to_datetime(gmgi['time'])
+
+        gmgi = gmgi.merge(
+            gdf_grid[['id', 'geometry','stat_area','depth']], on='id', how='left')
+
+        gmgi = gmgi[gmgi['time'] > pd.to_datetime(
+            last_runtime).replace(tzinfo=None)]
+        if gmgi.empty:
+            logger.info('No recent data in GMGI local')
+            return pd.DataFrame()
+        gmgi.drop(columns=['geometry'], inplace=True)
+    except Exception as e:
+        logger.error("Error loading local GMGI data: %s", e)
+        raise
+    logger.info("Local GMGI data loaded")
+    return gmgi
 
 def determine_reload_schedule() -> tuple:
     """Determine the reload schedule based on the current date and return query time"""
@@ -368,6 +412,18 @@ def lambda_handler(event, context):
                 "reload_type": reload_type,
                 "fetch_erddap_success": 0
             })
+        elif data_provider == 'gmgi':
+            gmgi = load_local_gmgi(gdf_grid, query_time)
+            database_log.append({
+                "dataset_id": "gmgi",
+                "observation_count": len(gmgi),
+                "runtime": current_time,
+                "version": __version__,
+                "data_provider": data_provider,
+                "file_protocol": "local",
+                "reload_type": reload_type,
+                "fetch_erddap_success": 0
+            })
         else:
             for i, dataset_id in enumerate(dataset_info["dataset_id"]):
                 result = results.pop(0)
@@ -409,7 +465,7 @@ def lambda_handler(event, context):
             dataframes = [df for df in dataframes if not df.empty]
             combined_df = pd.concat(dataframes, ignore_index=True)
 
-            if combined_df.empty and studyfleet.empty:  # ! remove this check once study fleet are on erddap
+            if combined_df.empty and studyfleet.empty and gmgi.empty:  # ! remove this check once study fleet are on erddap
                 logger.info('No data to process, exiting...')
                 return
             logger.info('Concatenated %s dataframes into a single dataframe with %s rows and %s columns.',
@@ -425,7 +481,7 @@ def lambda_handler(event, context):
     standard_df = sp.gridify_df(combined_df, gdf_grid)
     logger.info('grid assiggment complete!')
     try:
-        full_fleet = pd.concat([studyfleet, standard_df], ignore_index=True)
+        full_fleet = pd.concat([gmgi, studyfleet, standard_df], ignore_index=True)
     except Exception as e:
         logger.warning('Could not concat with Study Fleet:%s', e)
         full_fleet = standard_df
