@@ -8,16 +8,17 @@
 {
     "cfrf": {
         "server": "https://erddap.ondeckdata.com/erddap/",
-        "dataset_id": ["fixed_gear_oceanography", "shelf_fleet_profiles_1m_binned", "wind_farm_profiles_1m_binned"],
-        "protocol": ["tabledap", "tabledap", "tabledap"],
-        "response": ["nc", "nc", "nc"],
+        "dataset_id": ["fixed_gear_oceanography", "shelf_fleet_profiles_1m_binned", "wind_farm_profiles_1m_binned","wind_farm_acoustic_receivers"],
+        "protocol": ["tabledap", "tabledap", "tabledap", "tabledap"],
+        "response": ["nc", "nc", "nc", "nc"],
         "variables": [
             ["time", "latitude", "longitude", "temperature",
                 "dissolved_oxygen", "tow_id"],  # for fixed_gear_oceanography
             ["time", "latitude", "longitude", "conservative_temperature",
                 "sea_pressure", "profile_id", "absolute_salinity"],
             ["time", "latitude", "longitude", "conservative_temperature",
-                "sea_pressure", "profile_id", "absolute_salinity"]
+                "sea_pressure", "profile_id", "absolute_salinity"],
+            ["time", "latitude", "longitude", "station_id", "temperature"]
         ]
     },
     "emolt": {
@@ -48,6 +49,12 @@
         "protocol": [],
         "response": [],
     },
+    "gmgi": {
+        "server": "",
+        "dataset_id": [],  # This will be loaded locally from a CSV file
+        "protocol": [],
+        "response": [],
+    },
     "ecomon": {
         "server": "https://comet.nefsc.noaa.gov/erddap/",
         "dataset_id": ["ocdbs_v_erddap1"],
@@ -63,6 +70,25 @@
         "variables": [
             ["UTC_DATETIME", "latitude", "longitude", "sea_water_temperature", "pressure_dbars",
              "dissolved_oxygen", "sea_water_salinity", "cast_number", "cruise_id"]
+        ]
+    },
+    "oleander": {
+        "server": "http://erddap.oleander.bios.edu:8080/erddap/",
+        "dataset_id": ["oleanderXbt"],
+        "protocol": ["tabledap"],
+        "response": ["nc"],
+        "constraints": {"oleanderXbt": {
+            "hit_bottom=": 1,
+            "latitude>=": 38.18,
+            "latitude<=": 41.04,
+            "longitude>=": -74.12,
+            "longitude<=": -71.26,
+            "start_year>": 1999
+        }
+        },
+
+        "variables": [
+            ["time", "latitude", "longitude", "temp", "depth","profile_number", "cruise_num"]
         ]
     },
     "archive": {
