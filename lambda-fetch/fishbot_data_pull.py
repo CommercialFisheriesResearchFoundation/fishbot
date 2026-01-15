@@ -202,6 +202,7 @@ def standardize_df(df, dataset_id) -> pd.DataFrame:
             return pd.DataFrame(columns=keepers)
     
     elif dataset_id =='oleanderXbt':
+        df.rename(columns={'temp': 'temperature'}, inplace=True)
         df['time'] = pd.to_datetime(df['time'])
         df['profile_id'] = df['cruise_num'].astype(str) + '_' + df['profile_number'].astype(str)
         df_re = df.loc[df.groupby('profile_id')['depth'].idxmax()]
