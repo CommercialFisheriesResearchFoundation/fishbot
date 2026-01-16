@@ -208,7 +208,7 @@ def standardize_df(df, dataset_id) -> pd.DataFrame:
         df.rename(columns={'temp': 'temperature'}, inplace=True)
         df['time'] = pd.to_datetime(df['time'])
         df['time_hour'] = df['time'].dt.floor('H')
-        df = df.groupby('time_hour').mean().reset_index()
+        df = df.groupby(['latitude','longitude','time_hour']).mean().reset_index()
         df.drop(columns=['time'], inplace=True)
         df.rename(columns={'time_hour': 'time'}, inplace=True)
         df['profile_id'] = df['cruise_num'].astype(str) + '_' + df['profile_number'].astype(str)
