@@ -207,10 +207,6 @@ def standardize_df(df, dataset_id) -> pd.DataFrame:
     elif dataset_id =='oleanderXbt':
         df.rename(columns={'temp': 'temperature'}, inplace=True)
         df['time'] = pd.to_datetime(df['time'])
-        df['time_hour'] = df['time'].dt.floor('H')
-        df = df.groupby(['latitude','longitude','time_hour']).mean().reset_index()
-        df.drop(columns=['time'], inplace=True)
-        df.rename(columns={'time_hour': 'time'}, inplace=True)
         df['profile_id'] = df['cruise_num'].astype(str) + '_' + df['profile_number'].astype(str)
         df = df.loc[df.groupby('profile_id')['depth'].idxmax()]
         df.loc[:, 'data_provider'] = 'Oleander'
