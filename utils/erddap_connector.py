@@ -108,9 +108,3 @@ class ERDDAPClient:
         except Exception as e:
             logger.error("Error fetching all data: %s", e)
             raise
-    
-
- 
-      
-
-
