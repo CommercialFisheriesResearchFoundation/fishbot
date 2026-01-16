@@ -1,17 +1,19 @@
 __author__ = 'Linus Stoltz | Data Manager, CFRF'
 __project_team__ = 'Linus Stoltz, Sarah Salois, George Maynard, Mike Morin'
 __doc__ = 'FIShBOT program to aggregate regional data into a standarzied daily grid'
-__version__ = '0.9'
+__version__ = '1.0'
 
 import logging
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 from utils.database_connector import DatabaseConnector
-import utils.spatial_tools as sp
+# import utils.spatial_tools as sp
 from utils.netcdf_packing import pack_to_netcdf
 from utils.s3_connector import S3Connector
 import pandas as pd
 import os
+import resource
+import json
 from datetime import datetime, timezone
 
 DB_USER = os.getenv('DB_USER')
@@ -20,6 +22,7 @@ DB_HOST = os.getenv('DB_HOST')
 DB = os.getenv('DB')
 DB_ARCHIVE_TABLE = os.getenv('DB_ARCHIVE_TABLE')
 DB_EVENTS_TABLE = os.getenv('DB_EVENTS_TABLE')
+DB_DIAG_TABLE = os.getenv('DB_DIAG_TABLE')
 BUCKET_NAME = os.getenv('BUCKET_NAME')
 AWS_REGION = os.getenv('REGION')
 S3_PREFIX = os.getenv('PREFIX')
@@ -81,12 +84,14 @@ def aggregated_data(df) -> pd.DataFrame:
 
     return df_aggregated
 
-
 def lambda_handler(event, context):
     """ main function to call all subroutines"""
     logger.info("=============================")
     logger.info("FIShBOT Application started")
-    current_time = datetime.now(timezone.utc).isoformat()
+    
+    # Record start time for diagnostics
+    start_time = datetime.now(timezone.utc)
+    current_time = start_time.isoformat()
 
     record = event['Records'][0]
     bucket = record['s3']['bucket']['name']
@@ -95,23 +100,23 @@ def lambda_handler(event, context):
     prefix = os.path.dirname(intermediate_key)
     try:
         logger.info('accesing handoff data from S3')
-        full_fleet, database_log = s3.get_handoff_data(intermediate_key)
+        full_fleet, database_log, upstream_diagnostics = s3.get_handoff_data(intermediate_key)
         fishbot_ds = s3.get_fishbot_archive_dataset(prefix)
         reload_type = database_log[0].get('reload_type', None) # grab the reload type from the first entry in the log
         doi = database_log[0].get('doi', None) # grab the doi from the first entry in the log
-
+        t_after_s3_retrieval = datetime.now(timezone.utc)
     except Exception as e:
         logger.error("Error accessing handoff data from S3: %s", e)
         raise
 
     with DatabaseConnector(DB_HOST, DB_USER, DB_PASS, DB) as db:
-        db.log_data_events(database_log, DB_EVENTS_TABLE)
+        db.insert_records(database_log, DB_EVENTS_TABLE)
+    t_after_db_events = datetime.now(timezone.utc)
 
     try:
-        # full_fleet = get_file_from_s3(BUCKET_NAME, AWS_REGION, S3_PREFIX)
         logger.info('aggregating data to daily averages...')
         agg_df = aggregated_data(full_fleet)
-
+        t_after_aggregation = datetime.now(timezone.utc)
     except Exception as e:
         logger.error("Error processing data: %s", e)
         raise
@@ -121,7 +126,7 @@ def lambda_handler(event, context):
     try:
         files = pack_to_netcdf(
             agg_df, s3, prefix=S3_PREFIX, version=__version__)
-        
+        t_after_netcdf = datetime.now(timezone.utc)
     except Exception as e:
         logger.error("Error packing data to NetCDF: %s", e)
         raise
@@ -130,9 +135,9 @@ def lambda_handler(event, context):
     logger.info('-----------------------------------------')
     logger.info('Archiving fishbot_realtime')
     try:
-        archvie_file_size = s3.archive_fishbot(fishbot_ds, current_time,
+        archive_file_size = s3.archive_fishbot(fishbot_ds, current_time,
                            version=__version__, prefix=S3_ARCHIVE_PREFIX, doi=doi)
-
+        t_after_archive = datetime.now(timezone.utc)
         logger.info('Fishbot archive created successfully!')
         logger.info('-----------------------------------------')
     except Exception as e:
@@ -143,7 +148,7 @@ def lambda_handler(event, context):
         archive_key = s3.get_archive_key()
         public_url = s3.get_archive_url()
         logger.info("Archive key: %s", public_url)
-
+        t_after_s3_push = datetime.now(timezone.utc)
     except Exception as e:
         logger.error("Error archiving fishbot: %s", e)
         raise
@@ -164,9 +169,9 @@ def lambda_handler(event, context):
                 "doi": doi,
                 "citation_url": citation_url,
                 "reload_type": reload_type,
-                "file_size_mb": archvie_file_size
+                "file_size_mb": archive_file_size
             }
-            db.log_archive(archive_dict, DB_ARCHIVE_TABLE)
+            db.insert_records(archive_dict, DB_ARCHIVE_TABLE)
             logger.info("Archive logged to DB successfully")
     except Exception as e:
         logger.error("Error logging archive to DB: %s", e, exc_info=True)
@@ -186,6 +191,58 @@ def lambda_handler(event, context):
     except Exception as e:
         logger.error("Error updating fishbot archive dataset: %s", e, exc_info=True)
         raise
+
+    # Calculate diagnostics
+    end_time = datetime.now(timezone.utc)
+    total_execution_seconds = (end_time - start_time).total_seconds()
+
+    def _secs(a, b):
+        try:
+            return (b - a).total_seconds() if (a is not None and b is not None) else None
+        except Exception:
+            return None
+
+    phase_durations = {
+        's3_retrieval_seconds': _secs(start_time, t_after_s3_retrieval),
+        'db_events_seconds': _secs(t_after_s3_retrieval, t_after_db_events),
+        'aggregation_seconds': _secs(t_after_db_events, t_after_aggregation),
+        'netcdf_packing_seconds': _secs(t_after_aggregation, t_after_netcdf),
+        'archive_creation_seconds': _secs(t_after_netcdf, t_after_archive),
+        's3_push_seconds': _secs(t_after_archive, t_after_s3_push),
+        'total_elapsed_seconds': total_execution_seconds
+    }
+
+    try:
+        mem_peak_kb = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+    except Exception:
+        mem_peak_kb = None
+
+    diagnostics = {
+        'runtime': current_time,
+        'program': 'fishbot_data_process',
+        'version': __version__,
+        'total_execution_seconds': total_execution_seconds,
+        'phase_durations': json.dumps(phase_durations),  # Serialize dict for DB storage
+        'memory_peak_kb': mem_peak_kb,
+        'pid': os.getpid(),
+        'nc_files_created': len(files)
+    }
+
+    logger.info('Diagnostics: total execution (s)=%s, phases=%s', total_execution_seconds, phase_durations)
+
+    try:
+        with DatabaseConnector(DB_HOST, DB_USER, DB_PASS, DB) as db:
+            # First, insert upstream diagnostics from the intermediate file
+            if upstream_diagnostics:
+                logger.info("Logging %d upstream diagnostics to DB", len(upstream_diagnostics))
+                db.insert_records(upstream_diagnostics, DB_DIAG_TABLE)
+            
+            # Then insert this script's diagnostics
+            logger.info("Logging process diagnostics to DB")
+            db.insert_records(diagnostics, DB_DIAG_TABLE)
+            logger.info("All diagnostics logged to DB successfully")
+    except Exception as e:
+        logger.error("Error logging diagnostics to DB: %s", e, exc_info=True)
 
     logger.info("Application complete!")
     logger.info("=============================")

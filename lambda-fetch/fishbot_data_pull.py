@@ -1,7 +1,7 @@
 __author__ = 'Linus Stoltz | Data Manager, CFRF'
 __project_team__ = 'Linus Stoltz, Sarah Salois, George Maynard, Mike Morin'
 __doc__ = 'FIShBOT program Step 1: Fetches data from ERDDAP and local files, standardizes, and saves to S3.'
-__version__ = '0.9.5'
+__version__ = '1.0'
 
 import logging
 import sys
@@ -20,6 +20,7 @@ from scipy.signal import medfilt
 import boto3
 import sqlite3
 import yaml
+import json
 
 BUCKET_NAME = os.getenv('BUCKET_NAME')
 AWS_REGION = os.getenv('REGION')
@@ -27,20 +28,23 @@ S3_PREFIX = os.getenv('PREFIX')
 FULL_RELOAD_FLAG = os.getenv('FULL_RELOAD_FLAG', 'False').lower() == 'true'
 
 def load_datasets():
-   """ function to load the datasets.yaml file from github or local"""
-   raw_url = os.getenv("DATASETS_URL",
-        "https://raw.githubusercontent.com/CommercialFisheriesResearchFoundation/fishbot/refs/heads/main/config/datasets.yaml"
-    )
-   try:
-        resp = requests.get(raw_url, timeout=5)
-        resp.raise_for_status()
-        return yaml.safe_load(resp.text)
-   except Exception as e:
-        logger.warning("Failed to load datasets.yaml from GitHub: %s", e)
+    use_local = os.getenv("USE_LOCAL_YAML", "false").lower() == "true"
 
-   logger.info("Loading datasets.yaml from local file instead")
-   with open('datasets.yaml', 'r') as f:
-        # datasets file loaded to docker image as fall back, may not be current to github
+    if not use_local:
+        try:
+            raw_url = os.getenv(
+                "DATASETS_URL",
+                "https://raw.githubusercontent.com/CommercialFisheriesResearchFoundation/fishbot/refs/heads/main/config/datasets.yaml"
+            )
+            logger.info("Loading datasets.yaml from %s", raw_url)
+            resp = requests.get(raw_url, timeout=5)
+            resp.raise_for_status()
+            return yaml.safe_load(resp.text)
+        except Exception as e:
+            logger.warning("Remote load failed: %s", e)
+
+    logger.info("Loading datasets.yaml from local file")
+    with open("datasets.yaml") as f:
         return yaml.safe_load(f)
 
 def test_erddap_archive() -> bool:
@@ -87,7 +91,6 @@ def standardize_df(df, dataset_id) -> pd.DataFrame:
                 .mean()
                 .reset_index()
             )
-
             df_re.loc[:, 'data_provider'] = 'eMOLT'
             df_re.loc[:, 'fishery_dependent'] = 1
 
@@ -204,12 +207,16 @@ def standardize_df(df, dataset_id) -> pd.DataFrame:
     elif dataset_id =='oleanderXbt':
         df.rename(columns={'temp': 'temperature'}, inplace=True)
         df['time'] = pd.to_datetime(df['time'])
+        df['time_hour'] = df['time'].dt.floor('H')
+        df = df.groupby('time_hour').mean().reset_index()
+        df.drop(columns=['time'], inplace=True)
+        df.rename(columns={'time_hour': 'time'}, inplace=True)
         df['profile_id'] = df['cruise_num'].astype(str) + '_' + df['profile_number'].astype(str)
-        df_re = df.loc[df.groupby('profile_id')['depth'].idxmax()]
-        df_re.loc[:, 'data_provider'] = 'Oleander'
-        df_re.loc[:, 'fishery_dependent'] = 0
-        existing_columns = [col for col in keepers if col in df_re.columns]
-        return df_re[existing_columns]
+        df = df.loc[df.groupby('profile_id')['depth'].idxmax()]
+        df.loc[:, 'data_provider'] = 'Oleander'
+        df.loc[:, 'fishery_dependent'] = 0
+        existing_columns = [col for col in keepers if col in df.columns]
+        return df[existing_columns]
     
     elif dataset_id == 'ocdbs_v_erddap1':
         df.rename(columns={'UTC_DATETIME': 'time',
@@ -222,6 +229,28 @@ def standardize_df(df, dataset_id) -> pd.DataFrame:
         df_re.loc[:, 'fishery_dependent'] = 0
         existing_columns = [col for col in keepers if col in df_re.columns]
         return df_re[existing_columns]
+    
+    elif dataset_id.startswith('ooi-'):
+        try:
+            df['dissolved_oxygen'] = df['mole_concentration_of_dissolved_molecular_oxygen_in_sea_water'] * 0.0328 # convert from mol/kg to mg/L
+            df.rename(columns={
+                'sea_water_temperature': 'temperature',
+                'sea_water_practical_salinity': 'salinity'
+            }, inplace=True)
+            df['time'] = pd.to_datetime(df['time'])
+            df['time_hour'] = df['time'].dt.floor('H')
+            df = df.groupby('time_hour').mean().reset_index()
+            df.drop(columns=['time'], inplace=True)
+            df.rename(columns={'time_hour': 'time'}, inplace=True)
+            df.loc[:, 'data_provider'] = 'OOI'
+            df.loc[:, 'fishery_dependent'] = 0
+
+            existing_columns = [col for col in keepers if col in df.columns]
+            return df[existing_columns]
+        except Exception as e:
+            logger.error("error processing %s: %s", dataset_id, e)
+            # return an empty dataframe if processing fails
+            return pd.DataFrame(columns=keepers)
     else:
         logger.warning('No processing identified for %s', dataset_id)
         return pd.DataFrame(columns=keepers)
@@ -312,7 +341,7 @@ def determine_reload_schedule() -> tuple:
         logger.error("Error determining reload schedule: %s", e)
         return None, None
     
-def save_to_sqlite(df, database_log, db_name, doi) -> None:
+def save_to_sqlite(df, database_log, db_name, doi, diagnostics=None) -> None:
     """
     Save the combined dataframe and database log to SQLite tables in one database.
 
@@ -320,6 +349,7 @@ def save_to_sqlite(df, database_log, db_name, doi) -> None:
         df (pd.DataFrame): The combined dataframe to save.
         database_log (list): A list of dictionaries containing log information.
         db_name (str): The name of the SQLite database file.
+        diagnostics (dict, optional): Diagnostic information (timings, memory, cpu) to save to a separate table.
     """
     df.dropna(subset=['id'], inplace=True)
     df = df.drop(columns=['geometry'])
@@ -339,11 +369,23 @@ def save_to_sqlite(df, database_log, db_name, doi) -> None:
         db_log_df.to_sql('database_log', conn, if_exists='replace', index=False)
         logger.info('Database log saved to SQLite database at %s', db_name)
 
+        # Save diagnostics to a separate table if provided
+        if diagnostics is not None:
+            try:
+                # Ensure diagnostics is a flat record; convert nested dicts to strings for storage
+                diag_record = diagnostics.copy()
+                if 'phase_durations' in diag_record:
+                    diag_record['phase_durations'] = str(diag_record['phase_durations'])
+                diag_df = pd.DataFrame([diag_record])
+                diag_df.to_sql('diagnostics', conn, if_exists='replace', index=False)
+                logger.info('Diagnostics saved to SQLite database at %s', db_name)
+            except Exception as e:
+                logger.error('Error saving diagnostics to SQLite: %s', e)
     except Exception as e:
         logger.error('Error saving data to SQLite: %s', e)
     finally:
-        # Close the database connection
-        conn.close()
+         # Close the database connection
+         conn.close()
 
 def push_to_s3(file_path, bucket_name, s3_key) -> bool:
     """
@@ -370,6 +412,8 @@ def lambda_handler(event, context):
     """ main function to call all subroutines"""
     logger.info("=============================")
     logger.info("FIShBOT Application started")
+    # Record start time to calculate total execution duration
+    start_time = datetime.now(timezone.utc)
     DATASETS = load_datasets()
     if not test_erddap_archive():
         logger.error("ERDDAP dataset is not reachable. Exiting program.")
@@ -388,6 +432,8 @@ def lambda_handler(event, context):
     gdf_grid = sp.get_botgrid()
     dat = ERDDAPClient(DATASETS, query_time)
     results = asyncio.run(dat.fetch_all_data())
+    # Timestamp: after data retrieval
+    t_after_retrieval = datetime.now(timezone.utc)
 
     logger.info('Data retrieval complete!')
     dataframes = []
@@ -401,6 +447,9 @@ def lambda_handler(event, context):
                 logger.error("Error fetching fishbot archive: %s", fishbot_ds)
                 sys.exit(1)
 
+        #* -------------------------------------------
+        #* LOADING SIDE-LOADED DATA
+        #* -------------------------------------------
         elif data_provider == 'studyfleet':
             studyfleet = load_local_studyfleet(gdf_grid, query_time)
             database_log.append({
@@ -425,6 +474,9 @@ def lambda_handler(event, context):
                 "reload_type": reload_type,
                 "fetch_erddap_success": 0
             })
+        #* -------------------------------------------
+        #* LOADING ERDDAP FETCHED DATA
+        #* ------------------------------------------- 
         else:
             for i, dataset_id in enumerate(dataset_info["dataset_id"]):
                 result = results.pop(0)
@@ -458,6 +510,8 @@ def lambda_handler(event, context):
                     })
 
     logger.info('Standardizing dataframes complete!')
+    # Timestamp: after standardization
+    t_after_standardize = datetime.now(timezone.utc)
     logger.info('-----------------------------------')
 
     if dataframes:
@@ -481,11 +535,15 @@ def lambda_handler(event, context):
     
     standard_df = sp.gridify_df(combined_df, gdf_grid)
     logger.info('grid assiggment complete!')
+    # Timestamp: after grid assignment
+    t_after_gridify = datetime.now(timezone.utc)
     try:
         full_fleet = pd.concat([gmgi, studyfleet, standard_df], ignore_index=True)
     except Exception as e:
         logger.warning('Could not concat with Study Fleet:%s', e)
         full_fleet = standard_df
+    # Timestamp: after concatenation
+    t_after_concat = datetime.now(timezone.utc)
     logger.info('-----------------------------------')
     tmp_file_nc = f"/tmp/fishbot_archive_{str(current_time).split('T')[0]}.nc"
     try:
@@ -503,11 +561,63 @@ def lambda_handler(event, context):
         logger.error("Error pushing archive to Zenodo: %s", e)
         logger.warning("Fishbot archive data not pushed to Zenodo, but will be uploaded to S3")
         doi = None
+    # Sending to s3 before logging diagnostics
+    s3_archive_key = f"{S3_PREFIX}/fishbot_archive_intermediate.nc"
+    try:
+        
+        if push_to_s3(tmp_file_nc, BUCKET_NAME, s3_archive_key):
+            logger.info("Fishbot archive data successfully uploaded to S3")
+    except Exception as e:
+        logger.error("Failed to upload fishbot archive data to S3: %s", e)
+        raise Exception(f"Failed to upload {tmp_file_nc} to {BUCKET_NAME}/{s3_archive_key}: {e}")
+
+    t_after_zenodo = datetime.now(timezone.utc)
     logger.info('------------------------------------')
     # Save combined_df to a SQLite database
     tmp_file = '/tmp/fishbot_intermediate.db'
+
+    end_time = datetime.now(timezone.utc)
+    total_execution_seconds = (end_time - start_time).total_seconds()
+
+    def _secs(a, b):
+        try:
+            return (b - a).total_seconds() if (a is not None and b is not None) else None
+        except Exception:
+            return None
+
+    phase_durations = {
+        'data_retrieval_seconds': _secs(start_time, locals().get('t_after_retrieval')),
+        'standardize_seconds': _secs(locals().get('t_after_retrieval'), locals().get('t_after_standardize')),
+        'gridify_seconds': _secs(locals().get('t_after_standardize'), locals().get('t_after_gridify')),
+        'concat_seconds': _secs(locals().get('t_after_gridify'), locals().get('t_after_concat')),
+        'zenodo_seconds': _secs(locals().get('t_after_concat'), locals().get('t_after_zenodo')),
+        'total_elapsed_seconds': total_execution_seconds
+    }
+
     try:
-        save_to_sqlite(full_fleet, database_log, tmp_file, doi)
+        import resource
+        mem_peak_kb = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+    except Exception:
+        mem_peak_kb = None
+
+    diagnostics = {
+        'runtime': current_time,
+        'program': 'fishbot_data_pull',
+        'version': __version__,
+        'total_execution_seconds': total_execution_seconds,
+        'phase_durations': json.dumps(phase_durations),
+        'memory_peak_kb': mem_peak_kb,
+        'pid': os.getpid()
+    }
+
+    # attach total execution to each dataset log entry for backwards compatibility
+    for entry in database_log:
+        entry['execution_time_seconds'] = total_execution_seconds
+
+    logger.info('Diagnostics: total execution (s)=%s, phases=%s', total_execution_seconds, phase_durations)
+
+    try:
+        save_to_sqlite(full_fleet, database_log, tmp_file, doi, diagnostics)
         logger.info('Combined dataframe saved to SQLite database at %s', tmp_file)
     except Exception as e:
         logger.error('Error saving data to SQLite: %s', e)
@@ -522,12 +632,4 @@ def lambda_handler(event, context):
         raise Exception(f"Failed to upload {tmp_file} to {BUCKET_NAME}/{s3_key}")
     
     
-    s3_archive_key = f"{S3_PREFIX}/fishbot_archive_intermediate.nc"
-    try:
-        
-        if push_to_s3(tmp_file_nc, BUCKET_NAME, s3_archive_key):
-            logger.info("Fishbot archive data successfully uploaded to S3")
-    except Exception as e:
-        logger.error("Failed to upload fishbot archive data to S3: %s", e)
-        raise Exception(f"Failed to upload {tmp_file_nc} to {BUCKET_NAME}/{s3_archive_key}: {e}")
 

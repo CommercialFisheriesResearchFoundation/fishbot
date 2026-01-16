@@ -2,8 +2,6 @@ import mysql.connector
 import logging
 import pandas as pd
 logger = logging.getLogger()
-
-
 class DatabaseConnector:
     def __init__(self, host, user, password, database):
         self.host = host
@@ -79,41 +77,43 @@ class DatabaseConnector:
             logger.error("Error: %s", err)
             raise
     
-    def log_data_events(self, db_dict, table_name):
-        """ logs the data events to the database"""
-        try:
-            cursor = self.connection.cursor()
-            query = f"INSERT INTO {table_name} ({', '.join(db_dict[0].keys())}) VALUES ({', '.join(['%s'] * len(db_dict[0]))})"
-            for record in db_dict:
-                cursor.execute(query, tuple(record.values()))
-            self.connection.commit()
-            cursor.close()
-            logger.info("Data events logged successfully")
-        except mysql.connector.Error as err:
-            logger.error("Error: %s", err)
-            raise
+    # def log_data_events(self, db_dict, table_name):
+    #     """ logs the data events to the database"""
+    #     return self.insert_records(db_dict, table_name)
+    #     # try:
+    #     #     cursor = self.connection.cursor()
+    #     #     query = f"INSERT INTO {table_name} ({', '.join(db_dict[0].keys())}) VALUES ({', '.join(['%s'] * len(db_dict[0]))})"
+    #     #     for record in db_dict:
+    #     #         cursor.execute(query, tuple(record.values()))
+    #     #     self.connection.commit()
+    #     #     cursor.close()
+    #     #     logger.info("Data events logged successfully")
+    #     # except mysql.connector.Error as err:
+    #     #     logger.error("Error: %s", err)
+    #     #     raise
         
-    def log_archive(self, archive_dict, table_name):
-        """Logs the archive to the database."""
-        try:
-            cursor = self.connection.cursor()
-            if not archive_dict or not isinstance(archive_dict, dict):
-                raise ValueError(
-                    "archive_dict must be a non-empty dictionary. "
-                    "Cannot log archive."
-                )
-            query = (
-                f"INSERT INTO {table_name} "
-                f"({', '.join(archive_dict.keys())}) "
-                f"VALUES ({', '.join(['%s'] * len(archive_dict))})"
-            )
-            cursor.execute(query, tuple(archive_dict.values()))
-            self.connection.commit()
-            cursor.close()
-            logger.info("Archive logged successfully.")
-        except mysql.connector.Error as err:
-            logger.error("Error: %s", err)
-            raise
+    # def log_archive(self, archive_dict, table_name):
+    #     """Logs the archive to the database."""
+    #     return self.insert_records(archive_dict, table_name)
+    #     # try:
+    #     #     cursor = self.connection.cursor()
+    #     #     if not archive_dict or not isinstance(archive_dict, dict):
+    #     #         raise ValueError(
+    #     #             "archive_dict must be a non-empty dictionary. "
+    #     #             "Cannot log archive."
+    #     #         )
+    #     #     query = (
+    #     #         f"INSERT INTO {table_name} "
+    #     #         f"({', '.join(archive_dict.keys())}) "
+    #     #         f"VALUES ({', '.join(['%s'] * len(archive_dict))})"
+    #     #     )
+    #     #     cursor.execute(query, tuple(archive_dict.values()))
+    #     #     self.connection.commit()
+    #     #     cursor.close()
+    #     #     logger.info("Archive logged successfully.")
+    #     # except mysql.connector.Error as err:
+    #     #     logger.error("Error: %s", err)
+    #     #     raise
 
     def update_archive_record(self, table_name)-> dict:
         """ updates the archive record in the database"""
@@ -129,6 +129,39 @@ class DatabaseConnector:
             return results
         except mysql.connector.Error as err:
             logger.error("Error: %s", err)
+            raise
+
+    def insert_records(self, records, table_name):
+        """
+        Insert one or many records into a table.
+
+        records: dict or list[dict]
+        """
+        try:
+            cursor = self.connection.cursor()
+
+            # Normalize input to list of dicts
+            if isinstance(records, dict):
+                records = [records]
+            elif not isinstance(records, list) or not records:
+                raise ValueError("records must be a dict or non-empty list of dicts")
+
+            keys = records[0].keys()
+            placeholders = ", ".join(["%s"] * len(keys))
+            columns = ", ".join(keys)
+
+            query = f"INSERT INTO {table_name} ({columns}) VALUES ({placeholders})"
+
+            values = [tuple(r[k] for k in keys) for r in records]
+
+            cursor.executemany(query, values)
+            self.connection.commit()
+            cursor.close()
+
+            logger.info("Inserted %d record(s) into %s", len(values), table_name)
+
+        except mysql.connector.Error as err:
+            logger.error("MySQL error inserting into %s: %s", table_name, err)
             raise
 
     def __enter__(self):

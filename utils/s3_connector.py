@@ -110,13 +110,25 @@ class S3Connector:
                 columns = [description[0] for description in cursor.description]
                 data_dict = [dict(zip(columns, row)) for row in rows]
 
+                # Fetch the diagnostics table as a list of dictionaries
+                upstream_diagnostics = []
+                try:
+                    cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='diagnostics'")
+                    if cursor.fetchone():
+                        cursor.execute("SELECT * FROM diagnostics")
+                        diag_rows = cursor.fetchall()
+                        diag_columns = [description[0] for description in cursor.description]
+                        upstream_diagnostics = [dict(zip(diag_columns, row)) for row in diag_rows]
+                except Exception as e:
+                    logger.warning("Could not fetch diagnostics table: %s", e)
 
                 conn.close()
 
-            return df, data_dict
+            return df, data_dict, upstream_diagnostics
         except Exception as e:
             logger.error("Failed to fetch data from S3: %s", e)
             raise
+        
     def get_fishbot_archive_dataset(self,prefix) -> xr.Dataset:
         """ Method to fetch the fishbot archive dataset from S3 """
         try:

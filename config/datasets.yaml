@@ -91,6 +91,26 @@
             ["time", "latitude", "longitude", "temp", "depth","profile_number", "cruise_num"]
         ]
     },
+    "ooi": {
+        "server": "https://erddap.dataexplorer.oceanobservatories.org/erddap/",
+        "dataset_id": ["ooi-cp11nosm-mfd37-04-dostad000", "ooi-cp10cnsm-mfd37-04-dostad000", "ooi-cp11sosm-mfd37-04-dostad000","ooi-cp04ossm-mfd37-04-dostad000","ooi-cp01cnsm-mfd37-04-dostad000","ooi-cp03issm-mfd37-04-dostad000"],
+        "protocol": ["tabledap", "tabledap", "tabledap", "tabledap","tabledap","tabledap"],
+        "response": ["nc", "nc", "nc", "nc","nc","nc"],
+        "variables": [
+            ["time", "latitude", "longitude", "sea_water_temperature",
+        "sea_water_practical_salinity", "mole_concentration_of_dissolved_molecular_oxygen_in_sea_water"], 
+            ["time", "latitude", "longitude", "sea_water_temperature",
+        "sea_water_practical_salinity", "mole_concentration_of_dissolved_molecular_oxygen_in_sea_water"],
+            ["time", "latitude", "longitude", "sea_water_temperature",
+        "sea_water_practical_salinity", "mole_concentration_of_dissolved_molecular_oxygen_in_sea_water"],
+            ["time", "latitude", "longitude", "sea_water_temperature",
+        "sea_water_practical_salinity", "mole_concentration_of_dissolved_molecular_oxygen_in_sea_water"],
+            ["time", "latitude", "longitude", "sea_water_temperature",
+        "sea_water_practical_salinity", "mole_concentration_of_dissolved_molecular_oxygen_in_sea_water"],
+            ["time", "latitude", "longitude", "sea_water_temperature",
+        "sea_water_practical_salinity", "mole_concentration_of_dissolved_molecular_oxygen_in_sea_water"]
+        ]
+    },
     "archive": {
         "server": "https://erddap.ondeckdata.com/erddap/",
         "dataset_id": ["fishbot_realtime"],
