@@ -3,6 +3,7 @@ from botocore.exceptions import NoCredentialsError, PartialCredentialsError
 import logging
 import os
 import xarray as xr
+import polars as pl
 import tempfile
 from botocore.config import Config
 import sqlite3
@@ -19,6 +20,7 @@ class S3Connector:
         self.bucket_name = bucket_name
 
         session = boto3.Session()
+        logger.info("Using AWS profile: %s", session.profile_name)
         # increase the max pool connections to 50, default is 10, this speeds up the upload process
         config = Config(max_pool_connections=50)
         self.s3_client = session.client(
@@ -101,11 +103,57 @@ class S3Connector:
                 conn = sqlite3.connect(tmp.name)
                 cursor = conn.cursor()
 
-                # Get the first table as a DataFrame
-                df = pd.read_sql_query(f"SELECT * FROM aggregated_data", conn)
+                # Get available columns from the table
+                cursor.execute("PRAGMA table_info(aggregated_data)")
+                available_columns = {row[1] for row in cursor.fetchall()}
+
+                required_columns = ['time', 'latitude', 'longitude', 'temperature', 
+                                'data_provider', 'fishery_dependent', 'id', 'stat_area']
+                optional_columns = ['dissolved_oxygen', 'salinity', 'depth']
+
+                # Build SELECT clause with only available columns
+                select_parts = []
+                for col in required_columns:
+                    if col in ['latitude', 'longitude', 'temperature', 'depth']:
+                        select_parts.append(f"CAST({col} AS REAL) AS {col}")
+                    elif col in ['fishery_dependent', 'id', 'stat_area']:
+                        select_parts.append(f"CAST({col} AS INTEGER) AS {col}")
+                    else:
+                        select_parts.append(col)
+
+                for col in optional_columns:
+                    if col in available_columns:
+                        select_parts.append(f"CAST({col} AS REAL) AS {col}")
+
+                query = f"SELECT {', '.join(select_parts)} FROM aggregated_data"
+
+                # Read via pandas first. Polars still working out sqlite3 read
+                pandas_df = pd.read_sql_query(query, conn)
+                df = pl.from_pandas(pandas_df)
+
+                cast_exprs = [
+                    pl.col("time").str.strptime(pl.Datetime, "%Y-%m-%d %H:%M:%S", strict=False).alias("time"),
+                    pl.col("latitude").cast(pl.Float64),
+                    pl.col("longitude").cast(pl.Float64),
+                    pl.col("temperature").cast(pl.Float64),
+                    pl.col("data_provider").cast(pl.Utf8),
+                    pl.col("fishery_dependent").cast(pl.Int64),
+                    pl.col("id").cast(pl.Int64),
+                    pl.col("stat_area").cast(pl.Int64),
+                ]
+
+                # Add cols that could be missing in some datasets. 
+                if "dissolved_oxygen" in df.columns:
+                    cast_exprs.append(pl.col("dissolved_oxygen").cast(pl.Float64))
+                if "salinity" in df.columns:
+                    cast_exprs.append(pl.col("salinity").cast(pl.Float64))
+                if "depth" in df.columns:
+                    cast_exprs.append(pl.col("depth").cast(pl.Float64))
+
+                df = df.with_columns(cast_exprs)
 
                 # Fetch the database log table as a dictionary
-                cursor.execute(f"SELECT * FROM database_log")
+                cursor.execute("SELECT * FROM database_log")
                 rows = cursor.fetchall()
                 columns = [description[0] for description in cursor.description]
                 data_dict = [dict(zip(columns, row)) for row in rows]

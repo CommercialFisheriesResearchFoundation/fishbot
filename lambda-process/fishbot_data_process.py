@@ -1,7 +1,7 @@
 __author__ = 'Linus Stoltz | Data Manager, CFRF'
 __project_team__ = 'Linus Stoltz, Sarah Salois, George Maynard, Mike Morin'
 __doc__ = 'FIShBOT program to aggregate regional data into a standarzied daily grid'
-__version__ = '1.0'
+__version__ = '1.1'
 
 import logging
 logger = logging.getLogger()
@@ -11,6 +11,7 @@ from utils.database_connector import DatabaseConnector
 from utils.netcdf_packing import pack_to_netcdf
 from utils.s3_connector import S3Connector
 import pandas as pd
+import polars as pl
 import os
 import resource
 import json
@@ -29,60 +30,290 @@ S3_PREFIX = os.getenv('PREFIX')
 S3_ARCHIVE_PREFIX = os.getenv('ARCHIVE_PREFIX')
 
     
-def aggregated_data(df) -> pd.DataFrame:
+def aggregated_data(df,glider=False) -> pd.DataFrame:
     """ Function to aggregate the standardized data into fishbot format"""
     df.dropna(subset=['id'], inplace=True)
     df['time'] = pd.to_datetime(df['time'])
     df['id'] = df['id'].astype(int)
     df['date'] = df['time'].dt.date
+    if not glider:
+        try:
+            agg_columns = {
+                'temperature': ['mean', 'min', 'max', 'std', 'count'],
+                'data_provider': 'unique',
+                'id': 'first',
+                'latitude': 'first',
+                'longitude': 'first',
+                'fishery_dependent': 'first',
+                'stat_area': 'first',
+                'depth': 'first' 
+            }
 
+            # Check if 'dissolved_oxygen' exists in the dataframe
+            if 'dissolved_oxygen' in df.columns:
+                agg_columns['dissolved_oxygen'] = [
+                    'mean', 'min', 'max', 'std', 'count']
+
+            # Check if 'salinity' exists in the dataframe
+            if 'salinity' in df.columns:
+                agg_columns['salinity'] = ['mean', 'min', 'max', 'std', 'count']
+
+            df_aggregated = df.groupby(['date', 'id']).agg(
+                agg_columns).reset_index()
+        except Exception as e:
+            logger.error("Error aggregating data: %s", e)
+            return None
+        df_aggregated.columns = [
+            '_'.join(filter(None, col)).strip() if col[1] else col[0]
+            for col in df_aggregated.columns.to_flat_index()
+        ]
+
+        df_aggregated.rename(columns={'date': 'time',
+                                    'temperature_mean': 'temperature',
+                                    'dissolved_oxygen_mean': 'dissolved_oxygen',
+                                    'salinity_mean': 'salinity',
+                                    'data_provider_unique': 'data_provider',
+                                    'id_first': 'grid_id',
+                                    'latitude_first': 'latitude',
+                                    'longitude_first': 'longitude',
+                                    'fishery_dependent_first':'fishery_dependent',
+                                    'stat_area_first':'stat_area',
+                                    'depth_first':'depth'}, inplace=True)
+
+        df_aggregated['data_provider'] = df_aggregated['data_provider'].astype(
+            str).str.replace(r"[\[\]']", "", regex=True)
+
+        return df_aggregated
     try:
         agg_columns = {
-            'temperature': ['mean', 'min', 'max', 'std', 'count'],
+            'temperature': ['mean', 'min', 'max', 'std'],
             'data_provider': 'unique',
             'id': 'first',
             'latitude': 'first',
             'longitude': 'first',
-            'fishery_dependent': 'first',
             'stat_area': 'first',
-            'depth': 'first' 
+            'depth': 'first', 
+            'temperature_count': 'sum',
+            'dissolved_oxygen_count': 'sum',
+            'salinity_count': 'sum'
         }
-
         # Check if 'dissolved_oxygen' exists in the dataframe
         if 'dissolved_oxygen' in df.columns:
             agg_columns['dissolved_oxygen'] = [
-                'mean', 'min', 'max', 'std', 'count']
+                'mean', 'min', 'max', 'std']
 
         # Check if 'salinity' exists in the dataframe
         if 'salinity' in df.columns:
-            agg_columns['salinity'] = ['mean', 'min', 'max', 'std', 'count']
+            agg_columns['salinity'] = ['mean', 'min', 'max', 'std']
 
         df_aggregated = df.groupby(['date', 'id']).agg(
             agg_columns).reset_index()
+        
     except Exception as e:
-        logger.error("Error aggregating data: %s", e)
-        return None
+            logger.error("Error aggregating data: %s", e)
+            return None
     df_aggregated.columns = [
         '_'.join(filter(None, col)).strip() if col[1] else col[0]
         for col in df_aggregated.columns.to_flat_index()
     ]
 
     df_aggregated.rename(columns={'date': 'time',
-                                  'temperature_mean': 'temperature',
-                                  'dissolved_oxygen_mean': 'dissolved_oxygen',
-                                  'salinity_mean': 'salinity',
-                                  'data_provider_unique': 'data_provider',
-                                  'id_first': 'grid_id',
-                                  'latitude_first': 'latitude',
-                                  'longitude_first': 'longitude',
-                                  'fishery_dependent_first':'fishery_dependent',
-                                  'stat_area_first':'stat_area',
-                                  'depth_first':'depth'}, inplace=True)
+                                'temperature_mean': 'temperature',
+                                'dissolved_oxygen_mean': 'dissolved_oxygen',
+                                'salinity_mean': 'salinity',
+                                'data_provider_unique': 'data_provider',
+                                'id_first': 'grid_id',
+                                'latitude_first': 'latitude',
+                                'longitude_first': 'longitude',
+                                'fishery_dependent_first':'fishery_dependent',
+                                'stat_area_first':'stat_area',
+                                'depth_first':'depth',
+                                'temperature_count_sum': 'temperature_count',
+                                'dissolved_oxygen_count_sum': 'dissolved_oxygen_count',
+                                'salinity_count_sum': 'salinity_count'}, inplace=True)
 
     df_aggregated['data_provider'] = df_aggregated['data_provider'].astype(
         str).str.replace(r"[\[\]']", "", regex=True)
 
     return df_aggregated
+
+def aggregated_data_pl(df: pl.DataFrame) -> pl.DataFrame:
+    """Function to aggregate the standardized data into fishbot format"""
+    
+    # Drop rows with null id
+    df = df.drop_nulls(subset=['id'])
+    
+    # Ensure proper types
+    df = df.with_columns([
+        pl.col("time").cast(pl.Datetime),
+        pl.col("id").cast(pl.Int64),
+    ])
+    
+    # Add date column
+    df = df.with_columns(pl.col("time").dt.date().alias("date"))
+    
+    # Build aggregation expressions
+    agg_exprs = [
+        pl.col("temperature").mean().alias("temperature"),
+        pl.col("temperature").min().alias("temperature_min"),
+        pl.col("temperature").max().alias("temperature_max"),
+        pl.col("temperature").std().alias("temperature_std"),
+        pl.col("temperature").count().alias("temperature_count"),
+        pl.col("data_provider").unique().alias("data_provider"),
+        pl.col("id").first().alias("grid_id"),
+        pl.col("latitude").first().alias("latitude"),
+        pl.col("longitude").first().alias("longitude"),
+        pl.col("fishery_dependent").first().alias("fishery_dependent"),
+        pl.col("stat_area").first().alias("stat_area"),
+        pl.col("depth").first().alias("depth"),
+    ]
+    
+    # Add dissolved_oxygen aggregations if column exists
+    if "dissolved_oxygen" in df.columns:
+        agg_exprs.extend([
+            pl.col("dissolved_oxygen").mean().alias("dissolved_oxygen"),
+            pl.col("dissolved_oxygen").min().alias("dissolved_oxygen_min"),
+            pl.col("dissolved_oxygen").max().alias("dissolved_oxygen_max"),
+            pl.col("dissolved_oxygen").std().alias("dissolved_oxygen_std"),
+            pl.col("dissolved_oxygen").count().alias("dissolved_oxygen_count"),
+        ])
+    
+    # Add salinity aggregations if column exists
+    if "salinity" in df.columns:
+        agg_exprs.extend([
+            pl.col("salinity").mean().alias("salinity"),
+            pl.col("salinity").min().alias("salinity_min"),
+            pl.col("salinity").max().alias("salinity_max"),
+            pl.col("salinity").std().alias("salinity_std"),
+            pl.col("salinity").count().alias("salinity_count"),
+        ])
+    
+    # Perform aggregation
+    df_aggregated = df.group_by(["date", "id"]).agg(agg_exprs)
+    
+    # Rename date to time
+    df_aggregated = df_aggregated.rename({"date": "time"})
+    
+    # Convert data_provider list to string (remove brackets)
+    df_aggregated = df_aggregated.with_columns(
+        pl.col("data_provider").list.join(", ").alias("data_provider")
+    )
+    
+    return df_aggregated
+    
+def consolidate_aggregated_pl(df: pl.DataFrame) -> pl.DataFrame:
+    has_do = "dissolved_oxygen" in df.columns
+    has_sal = "salinity" in df.columns
+
+    # ---------- temperature ----------
+    temp_aggs = [
+        (pl.col("temperature") * pl.col("temperature_count")).sum().alias("t_wsum"),
+        pl.col("temperature_count").sum().alias("temperature_count"),
+        pl.col("temperature_min").min(),
+        pl.col("temperature_max").max(),
+        ((pl.col("temperature_count") - 1) * pl.col("temperature_std") ** 2).sum().alias("t_var1"),
+        (pl.col("temperature") * pl.col("temperature_count")).sum().alias("t_wsum2"),
+        (pl.col("temperature") ** 2 * pl.col("temperature_count")).sum().alias("t_var2"),
+    ]
+
+    # ---------- dissolved oxygen ----------
+    do_aggs = []
+    if has_do:
+        do_aggs = [
+            (pl.col("dissolved_oxygen") * pl.col("dissolved_oxygen_count")).sum().alias("do_wsum"),
+            pl.col("dissolved_oxygen_count").sum().alias("dissolved_oxygen_count"),
+            pl.col("dissolved_oxygen_min").min(),
+            pl.col("dissolved_oxygen_max").max(),
+            ((pl.col("dissolved_oxygen_count") - 1) * pl.col("dissolved_oxygen_std") ** 2).sum().alias("do_var1"),
+            (pl.col("dissolved_oxygen") ** 2 * pl.col("dissolved_oxygen_count")).sum().alias("do_var2"),
+        ]
+
+    # ---------- salinity ----------
+    sal_aggs = []
+    if has_sal:
+        sal_aggs = [
+            (pl.col("salinity") * pl.col("salinity_count")).sum().alias("s_wsum"),
+            pl.col("salinity_count").sum().alias("salinity_count"),
+            pl.col("salinity_min").min(),
+            pl.col("salinity_max").max(),
+            ((pl.col("salinity_count") - 1) * pl.col("salinity_std") ** 2).sum().alias("s_var1"),
+            (pl.col("salinity") ** 2 * pl.col("salinity_count")).sum().alias("s_var2"),
+        ]
+
+    out = (
+        df
+        .group_by(["time", "grid_id"])
+        .agg(
+            # providers
+            pl.col("data_provider").unique().alias("data_provider"),
+
+            # metadata
+            pl.col("latitude").drop_nulls().first(),
+            pl.col("longitude").drop_nulls().first(),
+            pl.col("stat_area").drop_nulls().first(),
+            pl.col("depth").drop_nulls().first(),
+
+            # temperature
+            *temp_aggs,
+            *do_aggs,
+            *sal_aggs,
+        )
+    )
+
+    # ---------- finalize derived stats ----------
+    out = out.with_columns(
+        # temperature
+        (pl.col("t_wsum") / pl.col("temperature_count")).alias("temperature"),
+        pl.when(pl.col("temperature_count") > 1)
+          .then(
+              ((pl.col("t_var1") + pl.col("t_var2")
+               - (pl.col("t_wsum") ** 2) / pl.col("temperature_count"))
+               / (pl.col("temperature_count") - 1)).sqrt()
+          )
+          .otherwise(None)
+          .alias("temperature_std"),
+
+        # provider cleanup
+        pl.col("data_provider")
+          .cast(pl.Utf8)
+          .str.replace_all(r"[\[\]']", "")
+    )
+
+    if has_do:
+        out = out.with_columns(
+            (pl.col("do_wsum") / pl.col("dissolved_oxygen_count")).alias("dissolved_oxygen"),
+            pl.when(pl.col("dissolved_oxygen_count") > 1)
+              .then(
+                  ((pl.col("do_var1") + pl.col("do_var2")
+                   - (pl.col("do_wsum") ** 2) / pl.col("dissolved_oxygen_count"))
+                   / (pl.col("dissolved_oxygen_count") - 1)).sqrt()
+              )
+              .otherwise(None)
+              .alias("dissolved_oxygen_std")
+        )
+
+    if has_sal:
+        out = out.with_columns(
+            (pl.col("s_wsum") / pl.col("salinity_count")).alias("salinity"),
+            pl.when(pl.col("salinity_count") > 1)
+              .then(
+                  ((pl.col("s_var1") + pl.col("s_var2")
+                   - (pl.col("s_wsum") ** 2) / pl.col("salinity_count"))
+                   / (pl.col("salinity_count") - 1)).sqrt()
+              )
+              .otherwise(None)
+              .alias("salinity_std")
+        )
+
+    return (
+        out
+        .sort(["time", "grid_id"])
+        .drop([
+            "t_wsum", "t_var1", "t_var2",
+            "do_wsum", "do_var1", "do_var2",
+            "s_wsum", "s_var1", "s_var2",
+        ], strict=False)
+    )
 
 def lambda_handler(event, context):
     """ main function to call all subroutines"""
@@ -115,7 +346,8 @@ def lambda_handler(event, context):
 
     try:
         logger.info('aggregating data to daily averages...')
-        agg_df = aggregated_data(full_fleet)
+        agg_df = aggregated_data_pl(full_fleet)
+        agg_df = agg_df.to_pandas() # convert back to pandas for netcdf packing, as xarray doesn't yet support polars
         t_after_aggregation = datetime.now(timezone.utc)
     except Exception as e:
         logger.error("Error processing data: %s", e)

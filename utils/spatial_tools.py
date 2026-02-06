@@ -1,8 +1,8 @@
 import logging
 import geopandas as gpd
 from shapely.geometry import Point
-# import pandas as pd
-# import xarray as xr
+import pandas as pd
+import xarray as xr
 
 logger = logging.getLogger()
 
@@ -29,6 +29,7 @@ def gridify_df(df, gdf_grid=None) -> gpd.GeoDataFrame:
             gdf_grid[['id', 'geometry','stat_area','depth','centroid_lon','centroid_lat']], on='id', how='left')
         coop_fleet = coop_fleet.drop(columns=['latitude', 'longitude'])
         coop_fleet.rename(columns={'centroid_lon': 'longitude', 'centroid_lat': 'latitude'}, inplace=True)
+        coop_fleet = coop_fleet[coop_fleet['latitude'].notna() & coop_fleet['longitude'].notna()] # drop any missing lat/lon after gridify
     except Exception as e:
         logger.error("Error gridifying the data: %s", e, exc_info=True)
         raise
@@ -103,27 +104,43 @@ def get_botgrid() -> gpd.GeoDataFrame:
 #     return df
 
 
-# def find_closest_depth(df) -> pd.DataFrame:
-#     '''Find the closest depth value from the bathymetry file'''
-#     try:
-#         logger.info('Assinging depth values to the data')
-#         fid = 'data/bathymetry/gebco_2024_n46.0_s36.0_w-76.0_e-64.0.nc'
-#         ds = xr.open_dataset(fid)
-#     except Exception as e:
-#         logger.error("Error loading bathymetry file: %s", e, exc_info=True)
-#         raise
-#     # grouped = df.groupby('tow_id').agg({'latitude': 'first', 'longitude': 'first'}).reset_index()
-#     # Initialize an empty list to store depth values
-#     try:
-#         depths = ds.sel(
-#             lat=xr.DataArray(df['latitude'], dims='z'),
-#             lon=xr.DataArray(df['longitude'], dims='z'),
-#             method='nearest'
-#         )['elevation'].values
+def find_closest_depth(df: pd.DataFrame) -> pd.DataFrame:
+    """Assign closest bathymetric depth based on lat/lon."""
+    logger.info("Assigning depth values to the data")
 
-#         # Add inferred depth as a new column, converting to absolute values
-#         df['depth'] = abs(depths).astype(int)
-#     except Exception as e:
-#         logger.error("Error assigning depth values: %s", e, exc_info=True)
-#         raise
-#     return df
+    fid = "data/bathymetry/gebco_2024_n46.0_s36.0_w-76.0_e-64.0.nc"
+    try:
+        ds = xr.open_dataset(fid)
+    except Exception as e:
+        logger.error("Error loading bathymetry file: %s", e, exc_info=True)
+        raise
+
+    unique_locs = (
+        df[["latitude", "longitude"]]
+        .drop_duplicates()
+        .reset_index(drop=True)
+    )
+
+    try:
+        # 2. Vectorized nearest-neighbor lookup
+        depths = ds["elevation"].sel(
+            lat=xr.DataArray(unique_locs["latitude"], dims="points"),
+            lon=xr.DataArray(unique_locs["longitude"], dims="points"),
+            method="nearest",
+        ).values
+
+        unique_locs["inferred_depth"] = abs(depths).astype(int)
+
+    except Exception as e:
+        logger.error("Error assigning depth values: %s", e, exc_info=True)
+        raise
+
+    # 3. Merge back to full dataframe
+    df = df.merge(
+        unique_locs,
+        on=["latitude", "longitude"],
+        how="left",
+    )
+
+    return df
+
