@@ -21,6 +21,22 @@
             ["time", "latitude", "longitude", "station_id", "temperature"]
         ]
     },
+    "ioos-gliders": {
+        "server": "https://erddap.ondeckdata.com/erddap/",
+        "dataset_id": ["demersal_gliders_aggregated"],
+        "protocol": ["tabledap"],
+        "response": ["nc"],
+        "constraints": {
+            "demersal_gliders_aggregated": {
+                "salinity>": 20,
+                "salinity<": 39,
+                # "dissolved_oxygen>": 0 this will get rid of data just missing DO values ... will add this filter in df standardization
+            }
+        },
+        "variables": [
+            ["time","grid_id", "temperature", "salinity", "dissolved_oxygen", "institution"]
+        ]
+    },
     "emolt": {
         "server": "https://erddap.emolt.net/erddap/",
         "dataset_id": ["eMOLT_RT", "eMOLT_RT_LOWELL"],
@@ -39,7 +55,7 @@
         },
         "variables": [
             ["time", "latitude", "longitude",
-                "temperature", "tow_id"],  # for eMOLT_RT
+                "temperature", "tow_id", "depth"],  # for eMOLT_RT
             ["time", "latitude", "longitude", "temperature", "DO", "tow_id"]
         ]
     },
@@ -63,7 +79,7 @@
         "constraints": {"ocdbs_v_erddap1": {
             "GEAR_TYPE!=": 'Bottle',
             "latitude>": 34,
-            "dissolved_oxygen>": 0
+            # "dissolved_oxygen>": 0 this will get rid of data just missing DO values ... will add this filter in df standardization
         }
         },
 

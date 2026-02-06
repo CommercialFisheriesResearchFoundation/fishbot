@@ -1,4 +1,4 @@
-FROM public.ecr.aws/lambda/python:3.10
+FROM public.ecr.aws/lambda/python:3.13
 WORKDIR ${LAMBDA_TASK_ROOT}
 
 
@@ -9,7 +9,7 @@ RUN pip install -r requirements.txt
 COPY utils/                  ./utils/
 COPY botgrid/botgrid.gpkg    ./botgrid/botgrid.gpkg
 COPY data/local_data/        ./data/local_data/
-# COPY data/bathymetry/        ./data/bathymetry/
+COPY data/bathymetry/       ./data/bathymetry/
 # COPY data/statistical_areas/ ./data/statistical_areas/
 
 COPY lambda-fetch/fishbot_data_pull.py .

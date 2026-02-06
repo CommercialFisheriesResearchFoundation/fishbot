@@ -258,11 +258,12 @@ def pack_to_netcdf(df_out, s3_conn, prefix='development', version="0.1", max_wor
         raise
 
     # Cast dtypes before grouping for memory and speed
+    logger.info('casting data types for memory efficiency...')
     df_out = _cast_dtypes(df_out)
 
     s3_keys = []
     grouped = df_out.groupby("time")
-
+    logger.info('processing %d groups (days) with max_workers=%s...', len(grouped), max_workers)
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = [
             executor.submit(process_group, day, group, s3_conn, prefix, version)

@@ -1,7 +1,7 @@
 __author__ = 'Linus Stoltz | Data Manager, CFRF'
 __project_team__ = 'Linus Stoltz, Sarah Salois, George Maynard, Mike Morin'
 __doc__ = 'FIShBOT program Step 1: Fetches data from ERDDAP and local files, standardizes, and saves to S3.'
-__version__ = '1.0'
+__version__ = '1.1'
 
 import logging
 import sys
@@ -26,10 +26,12 @@ BUCKET_NAME = os.getenv('BUCKET_NAME')
 AWS_REGION = os.getenv('REGION')
 S3_PREFIX = os.getenv('PREFIX')
 FULL_RELOAD_FLAG = os.getenv('FULL_RELOAD_FLAG', 'False').lower() == 'true'
+PUBLISH_DOI_FLAG = os.getenv('PUBLISH_DOI', 'True').lower() == 'true'
+SEAFLOOR_THRESHOLD = int(os.getenv('SEAFLOOR_THRESHOLD', '20'))  # meters
+logger.info("SEAFLOOR_THRESHOLD set to %d meters", SEAFLOOR_THRESHOLD)
 
 def load_datasets():
     use_local = os.getenv("USE_LOCAL_YAML", "false").lower() == "true"
-
     if not use_local:
         try:
             raw_url = os.getenv(
@@ -48,6 +50,7 @@ def load_datasets():
         return yaml.safe_load(f)
 
 def test_erddap_archive() -> bool:
+    """ Test connectivity to the ERDDAP server. If fails, skip daily reload"""
     server = 'https://erddap.ondeckdata.com/erddap/'
     dataset_id = 'fishbot_realtime'
     url = f"{server}tabledap/{dataset_id}.html"
@@ -62,8 +65,36 @@ def test_erddap_archive() -> bool:
     except requests.RequestException as e:
         logger.error("Error connecting to ERDDAP: %s", e)
         return False
+    
+def plot_filtered_data(depth_diff, dataset_id):
+    """ helper dev function used to determine appropriate depth difference filtering thresholds"""
+    import matplotlib.pyplot as plt
 
-def standardize_df(df, dataset_id) -> pd.DataFrame:
+    thresholds = [1, 2, 5, 10, 20, 30, 50, 75, 100, 150, 200, 300, 400, 500]
+    abs_diff = depth_diff.abs()
+    total = len(abs_diff)
+
+    results = []
+    for t in thresholds:
+        cnt = int((abs_diff <= t).sum())
+        pct = cnt / total * 100.0
+        results.append({'threshold_m': t, 'count': cnt, 'percent': pct})
+
+    results_df = pd.DataFrame(results)
+    fig, ax = plt.subplots(figsize=(10, 4.5))
+    ax.bar(results_df['threshold_m'].astype(str), results_df['percent'], color='C1', alpha=0.8)
+    ax.set_ylim(0, 100)
+    ax.set_ylabel('Percent of data retained (%)')
+    ax.set_xlabel('Absolute difference (GEBCO v pressure sensor) (m)')
+    ax.set_title(f'Percent of observations retained after filter {dataset_id}')
+
+    for i, pct in enumerate(results_df['percent']):
+        ax.text(i, min(pct - 5, pct * 0.9), f"{pct:.1f}%", ha='center', va='top', fontsize=10, color='black')
+
+    plt.tight_layout()
+    plt.savefig(f"/tmp/depth_difference_filter_{dataset_id}.png", dpi=300)
+
+def standardize_df(df, dataset_id, gdf_grid=None) -> pd.DataFrame:
     """ Stanfardize the dataframes to a common format. Each dataset slightly different and some need a little pre processing"""
     keepers = ['time', 'latitude', 'longitude', 'temperature',
                'salinity', 'dissolved_oxygen', 'data_provider', 'fishery_dependent']
@@ -79,9 +110,9 @@ def standardize_df(df, dataset_id) -> pd.DataFrame:
         try:
             # eMOLT data just bottom temperature
             df['time'] = pd.to_datetime(df['time'])
-            filt = ['latitude', 'longitude', 'temperature']
+            filt = ['latitude', 'longitude', 'temperature', 'depth']
             df = df.sort_values(['tow_id', 'time'])
-            # Set index for efficient resampling - optimizer
+            # Set index for efficient resampling
             df = df.set_index(['tow_id', 'time'])
             # Resample and aggregate
             df_re = (
@@ -89,8 +120,20 @@ def standardize_df(df, dataset_id) -> pd.DataFrame:
                 .groupby('tow_id')
                 .resample('h', level='time')
                 .mean()
+                .dropna(how='all')
                 .reset_index()
             )
+            df_re = sp.find_closest_depth(df_re)
+            # depth_diff = df_re['inferred_depth'] - df_re['depth']
+            # plot_filtered_data(depth_diff, dataset_id)
+            # df_re.to_csv('/tmp/emolt_with_depth.csv')
+            # df_before_filter = len(df_re)
+            df_re = df_re[df_re['depth'].notna() & df_re['inferred_depth'].notna() &
+                    ((df_re['depth'] - df_re['inferred_depth']) < SEAFLOOR_THRESHOLD)]
+            # df_after_filter = len(df_re)
+            # records_filtered = df_before_filter - df_after_filter
+            # logger.info('%s: Filtered out %d records (depth check). Before: %d, After: %d',
+            # dataset_id, records_filtered, df_before_filter, df_after_filter)
             df_re.loc[:, 'data_provider'] = 'eMOLT'
             df_re.loc[:, 'fishery_dependent'] = 1
 
@@ -106,7 +149,6 @@ def standardize_df(df, dataset_id) -> pd.DataFrame:
             df['time'] = pd.to_datetime(df['time'])
             df.reset_index(inplace=True)
             df = df[df['DO'] > 0]
-
             grouped = df.groupby('tow_id')['DO']
             mean = grouped.transform('mean')
             std = grouped.transform('std')
@@ -125,18 +167,19 @@ def standardize_df(df, dataset_id) -> pd.DataFrame:
             df = df.sort_values(['tow_id', 'time'])
             # Set index for efficient resampling - optimizer
             df = df.set_index(['tow_id', 'time'])
-
+            # logger.info('Before resample: %d rows', len(df))
+            # logger.info('Unique tow_ids: %d', df.index.get_level_values('tow_id').nunique())
+            # logger.info('Time range per tow (sample): %s', 
+            # df.groupby(level='tow_id')['temperature'].count().describe())
             # hourly average
             df_re = (
                 df[filt]
                 .groupby('tow_id')
                 .resample('h', level='time')
                 .mean()
+                .dropna(how='all')
                 .reset_index()
             )
-            # old slow way to aggreagate
-            # df_re = df.groupby('tow_id')[filt].apply(
-            #     lambda x: x.set_index('time').resample('h').mean().reset_index()).reset_index(drop=True)
 
             df_re.rename(
                 columns={'DO_filtered': 'dissolved_oxygen'}, inplace=True)
@@ -154,8 +197,19 @@ def standardize_df(df, dataset_id) -> pd.DataFrame:
     elif dataset_id in ["shelf_fleet_profiles_1m_binned", "wind_farm_profiles_1m_binned"]:
         try:
             df = df.loc[df.groupby('profile_id')['sea_pressure'].idxmax()]
-            df = df[['conservative_temperature', 'absolute_salinity',
-                     'latitude', 'longitude', 'time']]
+            df = sp.find_closest_depth(df)
+            # depth_diff = df['inferred_depth'] - df['sea_pressure']
+            # plot_filtered_data(depth_diff, dataset_id)
+
+            # Track filtering
+            # df_before_filter = len(df)
+            df = df[df['sea_pressure'].notna() & df['inferred_depth'].notna() &
+                    ((df['sea_pressure'] - df['inferred_depth']) < SEAFLOOR_THRESHOLD)]
+            # df_after_filter = len(df)
+            # records_filtered = df_before_filter - df_after_filter
+            # logger.info('%s: Filtered out %d records (depth check). Before: %d, After: %d', 
+            # dataset_id, records_filtered, df_before_filter, df_after_filter)
+
             df.rename(columns={'conservative_temperature': 'temperature',
                       'absolute_salinity': 'salinity'}, inplace=True)
             df.loc[:, 'data_provider'] = 'CFRF'
@@ -209,6 +263,11 @@ def standardize_df(df, dataset_id) -> pd.DataFrame:
         df['time'] = pd.to_datetime(df['time'])
         df['profile_id'] = df['cruise_num'].astype(str) + '_' + df['profile_number'].astype(str)
         df = df.loc[df.groupby('profile_id')['depth'].idxmax()]
+        df = sp.find_closest_depth(df)
+        # depth_diff = df['inferred_depth'] - df['depth']
+        # plot_filtered_data(depth_diff, dataset_id)
+        df = df[df['depth'].notna() & df['inferred_depth'].notna() &
+                      ((df['depth'] - df['inferred_depth']) < SEAFLOOR_THRESHOLD)]
         df.loc[:, 'data_provider'] = 'Oleander'
         df.loc[:, 'fishery_dependent'] = 0
         existing_columns = [col for col in keepers if col in df.columns]
@@ -217,10 +276,20 @@ def standardize_df(df, dataset_id) -> pd.DataFrame:
     elif dataset_id == 'ocdbs_v_erddap1':
         df.rename(columns={'UTC_DATETIME': 'time',
                            'sea_water_temperature': 'temperature',
-                           'sea_water_salinity': 'salinity'}, inplace=True)
-        df['profile_id'] = df['cruise_id'].astype(
-            str) + '_' + df['cast_number'].astype(str)
-        df_re = df.loc[df.groupby('profile_id')['pressure_dbars'].idxmax()]
+                           'sea_water_salinity': 'salinity','pressure_dbars':'sea_pressure'}, inplace=True)
+        df['profile_id'] = df['cruise_id'].astype(str) + '_' + df['cast_number'].astype(str)
+        df = df[(df["dissolved_oxygen"].isna()) | (df["dissolved_oxygen"] > 0)]
+        df_re = df.loc[df.groupby('profile_id')['sea_pressure'].idxmax()]
+        df_re = sp.find_closest_depth(df_re)
+        # depth_diff = df_re['inferred_depth'] - df_re['sea_pressure']
+        # plot_filtered_data(depth_diff, dataset_id)
+        # df_before_filter = len(df_re)
+        df_re = df_re[df_re['sea_pressure'].notna() & df_re['inferred_depth'].notna() &
+                ((df_re['sea_pressure'] - df_re['inferred_depth']) < SEAFLOOR_THRESHOLD)]
+        # df_after_filter = len(df_re)
+        # records_filtered = df_before_filter - df_after_filter
+        # logger.info('%s: Filtered out %d records (depth check). Before: %d, After: %d', 
+        # dataset_id, records_filtered, df_before_filter, df_after_filter)
         df_re.loc[:, 'data_provider'] = 'ECOMON'
         df_re.loc[:, 'fishery_dependent'] = 0
         existing_columns = [col for col in keepers if col in df_re.columns]
@@ -234,13 +303,65 @@ def standardize_df(df, dataset_id) -> pd.DataFrame:
                 'sea_water_practical_salinity': 'salinity'
             }, inplace=True)
             df['time'] = pd.to_datetime(df['time'])
-            df['time_hour'] = df['time'].dt.floor('H')
+            df['time_hour'] = df['time'].dt.floor('h')
             df = df.groupby('time_hour').mean().reset_index()
             df.drop(columns=['time'], inplace=True)
             df.rename(columns={'time_hour': 'time'}, inplace=True)
             df.loc[:, 'data_provider'] = 'OOI'
             df.loc[:, 'fishery_dependent'] = 0
 
+            existing_columns = [col for col in keepers if col in df.columns]
+            return df[existing_columns]
+        except Exception as e:
+            logger.error("error processing %s: %s", dataset_id, e)
+            # return an empty dataframe if processing fails
+            return pd.DataFrame(columns=keepers)
+    elif dataset_id == 'demersal_gliders_aggregated':
+        institution_map = {
+            "Graduate School of Oceanography, University of Rhode Island": 'glider_URI',
+            "Woods Hole Oceanographic Institution": 'glider_WHOI',
+            "University of Massachusetts Darmouth": 'glider_UMass',
+            "University of Massachusetts Dartmouth": 'glider_UMass',
+            "University of Massachussetts Dartmouth, Rutgers University": 'glider_UMass',
+            "Virginia Institute of Marine Science - William & Mary": 'glider_VIMS',
+            "Virginia Institute of Marine Science \u2013 William & Mary": 'glider_VIMS',
+            "Virginia Institute of Marine Science": 'glider_VIMS',
+            "University of Maryland": 'glider_UMD',
+            "University of Delaware College of Earth Ocean and Environment": 'glider_UDel',
+            "University of South Florida College of Marine Science Ocean Technology Group": 'glider_USF',
+            "University of Maine,Rutgers University": 'glider_UMaine',
+            "University of Maine": 'glider_UMaine',
+            "University of Massachusetts Dartmouth,Rutgers University": 'glider_UMass',
+            "Virginia Institute of Marine Science - The College of William & Mary": 'glider_VIMS',
+            "Helmholtz-Zentrum hereon": 'glider_HZ',
+            "Integrated Ocean Observing System,Naval Oceanographic Office,Rutgers University,National Oceanic and Atmospheric Administration,Mid-Atlantic Regional Association of Coastal Ocean Observing Systems,Rutgers University": 'glider_IOOS',
+            "Naval Oceanographic Office": 'glider_Navy',
+            "NAVOCEANO,Rutgers University": 'glider_NAVOCEANO',
+            "NAVOCEANO,University of Delaware": 'glider_NAVOCEANO',
+            "NAVOCEANO,William & Mary Virginia Institute of Marine Science": 'glider_NAVOCEANO',
+            "OOI Coastal & Global Scale Nodes (CGSN)": 'glider_OOI',
+            "Rutgers University": 'glider_RU',
+            "Rutgers University,Virginia Institute of Marine Science": 'glider_RU',
+            "Skidaway Institute of Oceanography": 'glider_UGA',
+            "Stony Brook University": 'glider_SBU',
+            "Stony Brook University School of Marine & Atmospheric Sciences": 'glider_SBU',
+            "Stony Brook University,Rutgers University": 'glider_SBU',
+            "Teledyne Webb Research Corporation": 'glider_RU',
+            "Teledyne Webb Research, Rutgers University, PLOCAN": 'glider_RU',
+            "UNC Marine Sciences": 'glider_UNC',
+            "University of Connecticut": 'glider_UConn',
+            "University of Delaware": 'glider_UDel',
+        }
+        try:
+            df['data_provider'] = df['institution'].map(institution_map).fillna('glider_other')
+            df = df[(df["dissolved_oxygen"].isna()) | (df["dissolved_oxygen"] > 0)]
+            df.rename(columns={'grid_id': 'id'}, inplace=True)
+            df = df.merge(
+                gdf_grid[['id', 'geometry', 'stat_area', 'depth', 'centroid_lon', 'centroid_lat']],
+                on='id', how='left')
+            df = df.drop(columns=['institution'])
+            df.rename(columns={'centroid_lon': 'longitude', 'centroid_lat': 'latitude'}, inplace=True)
+            df['fishery_dependent'] = 0
             existing_columns = [col for col in keepers if col in df.columns]
             return df[existing_columns]
         except Exception as e:
@@ -259,9 +380,11 @@ def load_local_studyfleet(gdf_grid, last_runtime) -> pd.DataFrame:
         study_fleet = pd.read_csv(
             'data/local_data/study_fleet_data_processed.csv')
         study_fleet['time'] = pd.to_datetime(study_fleet['time'])
-
+        
         study_fleet = study_fleet.merge(
-            gdf_grid[['id', 'geometry','stat_area','depth']], on='id', how='left')
+        gdf_grid[['id', 'geometry','stat_area','depth','centroid_lon','centroid_lat']], on='id', how='left')
+        # study_fleet = study_fleet.drop(columns=['latitude', 'longitude'])
+        study_fleet.rename(columns={'centroid_lon': 'longitude', 'centroid_lat': 'latitude'}, inplace=True)
 
         study_fleet = study_fleet[study_fleet['time'] > pd.to_datetime(
             last_runtime).replace(tzinfo=None)]
@@ -285,7 +408,9 @@ def load_local_gmgi(gdf_grid, last_runtime) -> pd.DataFrame:
         gmgi['time'] = pd.to_datetime(gmgi['time'])
 
         gmgi = gmgi.merge(
-            gdf_grid[['id', 'geometry','stat_area','depth']], on='id', how='left')
+        gdf_grid[['id', 'geometry','stat_area','depth','centroid_lon','centroid_lat']], on='id', how='left')
+        gmgi = gmgi.drop(columns=['latitude', 'longitude'])
+        gmgi.rename(columns={'centroid_lon': 'longitude', 'centroid_lat': 'latitude'}, inplace=True)
 
         gmgi = gmgi[gmgi['time'] > pd.to_datetime(
             last_runtime).replace(tzinfo=None)]
@@ -451,6 +576,7 @@ def lambda_handler(event, context):
             database_log.append({
                 "dataset_id": "studyfleet",
                 "observation_count": len(studyfleet),
+                "post_filter_count": len(studyfleet),
                 "runtime": current_time,
                 "version": __version__,
                 "data_provider": data_provider,
@@ -463,6 +589,7 @@ def lambda_handler(event, context):
             database_log.append({
                 "dataset_id": "gmgi",
                 "observation_count": len(gmgi),
+                "post_filter_count": len(gmgi),
                 "runtime": current_time,
                 "version": __version__,
                 "data_provider": data_provider,
@@ -473,6 +600,7 @@ def lambda_handler(event, context):
         #* -------------------------------------------
         #* LOADING ERDDAP FETCHED DATA
         #* ------------------------------------------- 
+
         else:
             for i, dataset_id in enumerate(dataset_info["dataset_id"]):
                 result = results.pop(0)
@@ -480,9 +608,14 @@ def lambda_handler(event, context):
                     logger.error("Error fetching %s: %s", dataset_id, result)
                 elif isinstance(result, pd.DataFrame):
                     num_observations = len(result)
+                    post_df = standardize_df(result, dataset_id, gdf_grid)
+                    logger.info('dataframe has %s rows and %s columns post standardization',
+                                post_df.shape[0], post_df.shape[1])
+                    dataframes.append(post_df)
                     database_log.append({
                         "dataset_id": dataset_id,
                         "observation_count": num_observations,
+                        "post_filter_count": len(post_df),
                         "runtime": current_time,
                         "version": __version__,
                         "data_provider": data_provider,
@@ -491,12 +624,11 @@ def lambda_handler(event, context):
                         "fetch_erddap_success": 1
                     })
 
-                    dataframes.append(standardize_df(result, dataset_id))
-
                 else:
                     database_log.append({
                         "dataset_id": dataset_id,
-                        "observation_count": "",
+                        "observation_count": 0,
+                        "post_filter_count": 0,
                         "runtime": current_time,
                         "version": __version__,
                         "data_provider": data_provider,
@@ -543,16 +675,19 @@ def lambda_handler(event, context):
     logger.info('-----------------------------------')
     tmp_file_nc = f"/tmp/fishbot_archive_{str(current_time).split('T')[0]}.nc"
     try:
-        logger.info('Pushing archive to Zenodo...')
-        fishbot_ds.to_netcdf(tmp_file_nc, mode='w')
-        zc = ZenodoConnector(tmp_file_nc)
-        zc.create_deposition()
-        zc.upload_file()
-        zc.add_metadata()
-        zc.publish()
-        doi = zc.get_doi()
-        # doi = 'ipsum-doi-placeholder'  #! TESTING
-        logger.info("Fishbot archive data successfully pushed to Zenodo with DOI: %s", doi)
+        if PUBLISH_DOI_FLAG:
+            logger.info('Pushing archive to Zenodo...')
+            fishbot_ds.to_netcdf(tmp_file_nc, mode='w')
+            zc = ZenodoConnector(tmp_file_nc)
+            zc.create_deposition()
+            zc.upload_file()
+            zc.add_metadata()
+            zc.publish()
+            doi = zc.get_doi()
+            logger.info("Fishbot archive data successfully pushed to Zenodo with DOI: %s", doi)
+        else:
+            logger.info('PUBLISH_DOI_FLAG is not set. Skipping push to Zenodo, but will upload to S3')
+            doi = None
     except Exception as e:
         logger.error("Error pushing archive to Zenodo: %s", e)
         logger.warning("Fishbot archive data not pushed to Zenodo, but will be uploaded to S3")
@@ -565,7 +700,7 @@ def lambda_handler(event, context):
             logger.info("Fishbot archive data successfully uploaded to S3")
     except Exception as e:
         logger.error("Failed to upload fishbot archive data to S3: %s", e)
-        raise Exception(f"Failed to upload {tmp_file_nc} to {BUCKET_NAME}/{s3_archive_key}: {e}")
+        raise Exception("Failed to upload %s to %s: %s" % (tmp_file_nc, BUCKET_NAME, s3_archive_key, e))
 
     t_after_zenodo = datetime.now(timezone.utc)
     logger.info('------------------------------------')
@@ -625,7 +760,7 @@ def lambda_handler(event, context):
         logger.info("SQLite database successfully uploaded to S3")
     else:
         logger.error("Failed to upload SQLite database to S3")
-        raise Exception(f"Failed to upload {tmp_file} to {BUCKET_NAME}/{s3_key}")
+        raise Exception("Failed to upload %s to %s: %s" % (tmp_file, BUCKET_NAME, s3_key))
     
     
 

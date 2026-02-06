@@ -14,5 +14,7 @@ fishbot*.nc
 *.ipynb
 *.list
 .vscode/
-
-
+event.json
+*.db
+*.csv
+output/
