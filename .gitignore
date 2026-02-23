@@ -18,3 +18,4 @@ event.json
 *.db
 *.csv
 output/
+.Rproj.user
