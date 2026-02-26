@@ -81,7 +81,7 @@ def aggregated_data(df,glider=False) -> pd.DataFrame:
                                     'depth_first':'depth'}, inplace=True)
 
         df_aggregated['data_provider'] = df_aggregated['data_provider'].astype(
-            str).str.replace(r"[\[\]']", "", regex=True)
+            str).str.replace(r"[\[\]',]", "", regex=True)
 
         return df_aggregated
     try:
