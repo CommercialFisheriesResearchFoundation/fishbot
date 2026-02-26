@@ -26,6 +26,9 @@ The dynamic refresh interval balances making real-time data accessible quickly a
 ### FIShBOT Archive Citation
 Each FIShBOT archive is minted a DOI for versioned citation. This is helpful if the data are incorporated into specific analysis or assessment for reproducibility. This is done automatically through the Zenodo API. The record of citations is collated in the [FIShBOT Community on Zenodo](https://zenodo.org/communities/fishbot/records?q=&l=list&p=1&s=10&sort=newest).
 
+## NOAA Technical Memo
+For additional information on the context of this data product see the [NOAA Technical Memorandum](https://repository.library.noaa.gov/view/noaa/72384)
+
 ## See this live
 
 FIShBOT is deployed on AWS Lambda and aggregates the data to an S3 bucket. The files are synced to the erddap server daily at midnight EST.
