@@ -1,0 +1,24 @@
+---
+title: "Let's Talk!"
+---
+
+### Do you have data? Do you have questions? 
+
+<br>
+
+### Contact the FIShBOT team:
+
+-   <b>Linus Stoltz</b>, [<i>Data Manager (CFRF)</i>](https://www.cfrfoundation.org/staff): lstoltz\@cfrfoundation.org
+
+-   <b>George Maynard</b>, [<i>Marine Resources Management Specialist (NOAA)</i>](https://www.fisheries.noaa.gov/contact/george-maynard-phd): george.maynard\@noaa.gov
+
+-   <b>Mike Morin</b>, [<i>Marine Resources Management Specialist (NOAA)</i>](https://www.fisheries.noaa.gov/contact/mike-morin): mike.morin\@noaa.gov
+
+-   <b>Sarah Salois</b>, <i>Fisheries Biologist (NOAA)</i>: sarah.salois\@noaa.gov
+
+
+## Found an issue?
+
+If you are experiencing problems with this data, please submit an issue on our github repository!
+
+[Report a Bug](https://github.com/CommercialFisheriesResearchFoundation/fishbot/issues){.btn .btn-primary role="button" style="background-color: #32926F; color: white; border-color: #32926F;"}

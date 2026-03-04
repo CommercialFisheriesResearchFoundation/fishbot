@@ -1,0 +1,30 @@
+project:
+  type: website
+  output-dir: docs
+
+website:
+  title: "FIShBOT"
+  navbar:
+    left:
+      - href: index.qmd
+        text: Home
+      - href: about.qmd
+        text: About
+      - href: contact.qmd
+        text: Contact
+
+format:
+  html:
+    lightbox: true
+    code-copy: true        # Adds a "copy" button to code chunks
+    code-overflow: wrap    # Prevents long Python/R lines from breaking the layout
+    code-tools: false       # Adds a "View Source" menu to the page
+    theme:
+      - cosmo
+      - styles.scss
+    toc: false
+
+execute:
+  freeze: auto
+  
+  

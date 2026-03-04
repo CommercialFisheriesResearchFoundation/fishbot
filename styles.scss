@@ -1,0 +1,37 @@
+/*-- scss:defaults --*/
+  $body-bg: #f8f9fa;        // Main background color
+  $navbar-bg: #2c3e50;      // Custom navbar color
+  $link-color:  #338667 ; /*, #3B9A76, #46B48a;*/  // Custom accent color
+  
+  /*-- scss:rules --*/
+  body {
+    background: linear-gradient(135deg, #E8FAEA 0%, #6DD19C 100%) no-repeat fixed; // Subtle gradient
+  
+    // Ensures the background covers at least the full height of the screen
+    min-height: 100vh; 
+  
+    font-size: 1.15rem; 
+    line-height: 1.6; /* Adds breathing room between lines for readability */
+    margin: 0;
+  }
+  .custom-list ul { /* ul == unordered list */
+    list-style: none;
+    padding-left: 1.5rem;
+  }
+  
+  .custom-list li {
+   /* display: flex; /* enables flexbox, for centering */
+   /* align-items: center;*/
+    font-size: 1.3rem; 
+    margin-bottom: 0.5rem; /* adds space between bullet points */
+  }
+  
+  .custom-list li::before {/* li == list item  */
+    content: '⚪'; 
+    padding-right: 10px;
+    color: #007bff;
+   
+  }
+
+
+
