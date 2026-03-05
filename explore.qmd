@@ -9,9 +9,11 @@ page-layout: full
 }
 </style>
 
+<br>
 
 ::: {.column-screen}
 ```{=html}
-<iframe src="https://ondeckdata.com/database/osm_fishbot_explorer.html" width="100%" height="800px"></iframe>
+<iframe src="https://ondeckdata.com/database/osm_fishbot_explorer.html" width=100% height="900px"></iframe>
 ```
 :::
+
