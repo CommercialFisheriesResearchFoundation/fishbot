@@ -5,6 +5,7 @@
 [![License](https://img.shields.io/badge/License-NOAA%20Open%20Source-00BFFF)](https://github.com/CommercialFisheriesResearchFoundation/fishbot/blob/main/License.txt)
 [![Data](https://img.shields.io/badge/Data-Live%20ERDDAP-brightgreen)](https://erddap.ondeckdata.com/erddap/tabledap/fishbot_realtime.html)
 [![NOAA](https://img.shields.io/badge/NOAA-Technical%20Memo-003087?logo=noaa&logoColor=white)](https://repository.library.noaa.gov/view/noaa/72384)
+[![Awesome](https://awesome.re/badge.svg)](https://github.com/sindresorhus/awesome#readme)
 
 ## Fishing Industry Shared Bottom Oceanographic Timeseries
 
