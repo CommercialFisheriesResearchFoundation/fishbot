@@ -6,7 +6,7 @@ data/local_data/
 data/studyfleet_raw/
 env/
 
-*.png
+# *.png
 fishbot*.nc
 
 *.sh
