@@ -41,7 +41,7 @@ about:
 
 
 ::: {.column width="40%"}
-![FIShBOT Bottom Temperature for 2025](images/FISHBOT_BottomTemp_2025.gif){width='100%'}
+![FIShBOT Bottom Temperature for 2025](images/FISHBOT_BottomTemp_2025-v4.gif){width='100%'}
 :::
 
 ::::
