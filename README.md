@@ -1,3 +1,11 @@
+[![Python](https://img.shields.io/badge/Python-3.11-blue?logo=python&logoColor=white)](https://www.python.org/)
+[![AWS Lambda](https://img.shields.io/badge/AWS-Lambda-FF9900?logo=awslambda&logoColor=white)](https://aws.amazon.com/lambda/)
+[![DOI](https://img.shields.io/badge/DOI-Zenodo-024Dad?logo=zenodo&logoColor=white)](https://zenodo.org/communities/fishbot/records?q=&l=list&p=1&s=10&sort=newest)
+[![Amazon S3](https://img.shields.io/badge/Amazon%20S3-Storage-569A31?logo=amazons3&logoColor=white)](https://aws.amazon.com/s3/)
+[![License](https://img.shields.io/badge/License-NOAA%20Open%20Source-00BFFF)](https://github.com/CommercialFisheriesResearchFoundation/fishbot/blob/main/License.txt)
+[![Data](https://img.shields.io/badge/Data-Live%20ERDDAP-brightgreen)](https://erddap.ondeckdata.com/erddap/tabledap/fishbot_realtime.html)
+[![NOAA](https://img.shields.io/badge/NOAA-Technical%20Memo-003087?logo=noaa&logoColor=white)](https://repository.library.noaa.gov/view/noaa/72384)
+
 ## Fishing Industry Shared Bottom Oceanographic Timeseries
 
 ## About FIShBOT
