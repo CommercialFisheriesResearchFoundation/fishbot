@@ -62,6 +62,8 @@ Memorandum and learn more!
 - eMOLT (GOMLF, NOAA, CCS, UMaine, CFRF, CFF, ODN, Rutgers)
 - ECOMON (NEFSC-NOAA)
 - Lobster & Jonah Crab Research Fleet (CFRF)
+- Shelf Research Fleet (CFRF)
+- South Fork Wind Farm (CFRF)
 - Oleander XBT (BIOS)
 - Pioneer Array (OOI)
 - Gloucester Marine Genomics Institute (GMGI)
