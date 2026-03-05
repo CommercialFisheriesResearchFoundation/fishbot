@@ -10,7 +10,7 @@ page-layout: full
 </style>
 
 
-::: {.column-page}
+::: {.column-screen}
 ```{=html}
 <iframe src="https://ondeckdata.com/database/osm_fishbot_explorer.html" width="100%" height="800px"></iframe>
 ```
