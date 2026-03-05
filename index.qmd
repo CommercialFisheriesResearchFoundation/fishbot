@@ -90,9 +90,6 @@ about:
 #### You can find us lots of places! 
 
 ::: {.custom-list}
-- <b>[FIShBOT Explorer](https://ondeckdata.com/database/osm_fishbot_explorer.html):</b>
-Interactive webpage where you can see the time series for each of the variables
-in FIShBOT!
 - <b>[Our ERDDAP Data Server](https://erddap.ondeckdata.com/erddap/tabledap/fishbot_realtime.graph):</b>
 Users can generate maps for any area on any given day. You can also download 
 the data here!

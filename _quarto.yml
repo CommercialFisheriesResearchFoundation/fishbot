@@ -6,12 +6,15 @@ website:
   title: "FIShBOT"
   navbar:
     left:
-      - href: index.qmd
-        text: Home
-      - href: about.qmd
-        text: About
-      - href: contact.qmd
-        text: Contact
+      - text: Home
+        href: index.qmd
+      - text: About
+        href: about.qmd
+      - text: Explore
+        href: explore.qmd
+      - text: Contact
+        href: contact.qmd
+     
 
 format:
   html:

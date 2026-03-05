@@ -7,7 +7,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
 
 
-<title>How it works – FIShBOT</title>
+<title>Explore – FIShBOT</title>
 <style>
 code{white-space: pre-wrap;}
 span.smallcaps{font-variant: small-caps;}
@@ -41,9 +41,6 @@ ul.task-list li input[type="checkbox"] {
 <script src="site_libs/bootstrap/bootstrap.min.js"></script>
 <link href="site_libs/bootstrap/bootstrap-icons.css" rel="stylesheet">
 <link href="site_libs/bootstrap/bootstrap-f014def6ab0481d3a3dc39e464cc56f9.min.css" rel="stylesheet" append-hash="true" id="quarto-bootstrap" data-mode="light">
-<script src="site_libs/quarto-contrib/glightbox/glightbox.min.js"></script>
-<link href="site_libs/quarto-contrib/glightbox/glightbox.min.css" rel="stylesheet">
-<link href="site_libs/quarto-contrib/glightbox/lightbox.css" rel="stylesheet">
 <script id="quarto-search-options" type="application/json">{
   "location": "navbar",
   "copy-button": false,
@@ -75,7 +72,7 @@ ul.task-list li input[type="checkbox"] {
 
 </head>
 
-<body class="nav-fixed fullcontent quarto-light">
+<body class="nav-fixed quarto-light">
 
 <div id="quarto-search-results"></div>
   <header id="quarto-header" class="headroom fixed-top">
@@ -99,7 +96,7 @@ ul.task-list li input[type="checkbox"] {
 <span class="menu-text">Home</span></a>
   </li>  
   <li class="nav-item">
-    <a class="nav-link active" href="./about.html" aria-current="page"> 
+    <a class="nav-link" href="./about.html"> 
 <span class="menu-text">About</span></a>
   </li>  
   <li class="nav-item">
@@ -107,7 +104,7 @@ ul.task-list li input[type="checkbox"] {
 <span class="menu-text">Contact</span></a>
   </li>  
   <li class="nav-item">
-    <a class="nav-link" href="./explore.html"> 
+    <a class="nav-link active" href="./explore.html" aria-current="page"> 
 <span class="menu-text">Explore</span></a>
   </li>  
 </ul>
@@ -118,21 +115,21 @@ ul.task-list li input[type="checkbox"] {
     </nav>
 </header>
 <!-- content -->
-<div id="quarto-content" class="quarto-container page-columns page-rows-contents page-layout-article page-navbar">
+<div id="quarto-content" class="quarto-container page-columns page-rows-contents page-layout-full page-navbar">
 <!-- sidebar -->
 <!-- margin-sidebar -->
     
 <!-- main -->
-<main class="content" id="quarto-document-content">
+<main class="content page-columns page-full column-body" id="quarto-document-content">
 
 <header id="title-block-header" class="quarto-title-block default">
 <div class="quarto-title">
-<h1 class="title">How it works</h1>
+<h1 class="title">Explore</h1>
 </div>
 
 
 
-<div class="quarto-title-meta">
+<div class="quarto-title-meta column-body">
 
     
   
@@ -144,50 +141,16 @@ ul.task-list li input[type="checkbox"] {
 </header>
 
 
-<section id="fishbot-workflow" class="level3">
-<h3 class="anchored" data-anchor-id="fishbot-workflow">FIShBOT Workflow:</h3>
-<p>The following schematic details the flow of data streams into the FIShBOT data product. Our near-real time data product pulls together both fishery-dependent (Commercial Fishing Fleet) and fishery-independent (Survey) oceanographic data and feeds it through our FIShBOT Program, which then turns it into one product (FIShBOT), a map of daily temperature averages across a 7km grid covering the Northwest Atlantic. This interorganizational effort relies on data being made publicly available through web-based scientific data servers (ERDDAP).</p>
-</section>
-<section id="refresh-interval" class="level3">
-<h3 class="anchored" data-anchor-id="refresh-interval">Refresh Interval</h3>
-<p>FIShBOT is updated dynamically every 24 hours. The dynamic refresh interval balances making real-time data accessible quickly and optimizing storage and performance. The contributing groups to FIShBOT rely on a rolling QA/QC schedule and often receive data at intermittent intervals from the fleet. To capture the dynamic nature of data contributing to FIShBOT, the program itself must be dynamic to reflect perpetual QA/QC efforts.</p>
-<p><a href="images/FIShBOT_data_flow.png" class="lightbox" data-gallery="quarto-lightbox-gallery-1"><img src="images/FIShBOT_data_flow.png" class="img-fluid"></a></p>
-</section>
-<section id="fishbot-program" class="level1">
-<h1>FIShBOT Program</h1>
-<p>FIShBOT is both a dataset and a Python program designed to synchronize and archive data from various sources to a standardized grid. The programatic side of this project has been designed to collect and combine data from each data server (ERDDAP above) and produces both a near-real-time data product and a companion fixed-version data product, which serves as an archive that captures each release of data. The source code lives in a public repository here:</p>
-<p><a href="https://github.com/CommercialFisheriesResearchFoundation/fishbot.git" class="btn btn-primary" role="button" style="background-color: #32926F; color: white; border-color: #32926F;">GitHub Repo</a></p>
-</section>
-<section id="fishbot-documentation" class="level1">
-<h1>FIShBOT documentation</h1>
-<section id="fishbot-archive-citation" class="level3">
-<h3 class="anchored" data-anchor-id="fishbot-archive-citation">FIShBOT Archive Citation</h3>
-<p>Each FIShBOT archive is minted a DOI for versioned citation. This is helpful if the data are incorporated into specific analysis or assessment for reproducibility. This is done automatically through the Zenodo API. The record of citations is collated in the FIShBOT Community on Zenodo.</p>
-<p><a href="https://zenodo.org/communities/fishbot/records?q=&amp;l=list&amp;p=1&amp;s=10&amp;sort=newest" class="btn btn-primary" role="button" style="background-color: #32926F; color: white; border-color: #32926F;">FIShBOT Archive</a></p>
-</section>
-<section id="technical-memorandum" class="level3">
-<h3 class="anchored" data-anchor-id="technical-memorandum">Technical Memorandum</h3>
-<p>The full details of the system design, data flow, and methodology for this gridded data product are documented via a Technical Memorandum hosted by the Northeast Fisheries Science Center. This documentation is accessible to the public and can be downloaded as a PDF. Click the button below to access that Memorandum and learn more!</p>
-<p><a href="https://repository.library.noaa.gov/view/noaa/72384" class="btn btn-primary" role="button" style="background-color: #32926F; color: white; border-color: #32926F;">FIShBOT Technical Memorandum</a></p>
-</section>
-<section id="data-contributors" class="level3">
-<h3 class="anchored" data-anchor-id="data-contributors">Data Contributors</h3>
-<ul>
-<li>Study Fleet (NEFSC-NOAA)</li>
-<li>eMOLT (GOMLF, NOAA, CCS, UMaine, CFRF, CFF, ODN, Rutgers)</li>
-<li>ECOMON (NEFSC-NOAA)</li>
-<li>Lobster &amp; Jonah Crab Research Fleet (CFRF)</li>
-<li>Shelf Research Fleet (CFRF)</li>
-<li>South Fork Wind Farm (CFRF)</li>
-<li>Oleander XBT (BIOS)</li>
-<li>Pioneer Array (OOI)</li>
-<li>Gloucester Marine Genomics Institute (GMGI)</li>
-<li>IOOS Glider Data Assembly Center (HZ, IOOS, OOI, NAVOCEANO, RU, SBU, UDel, UMaine, UMass, UGA USF, VIMS, WHOI)</li>
-</ul>
+<style>
+.quarto-title {
+  display: none;
+}
+</style>
+<div class="column-page">
+<iframe src="https://ondeckdata.com/database/osm_fishbot_explorer.html" width="100%" height="800px"></iframe>
+</div>
 
 
-</section>
-</section>
 
 </main> <!-- /main -->
 <script id="quarto-html-after-body" type="application/javascript">
@@ -591,38 +554,6 @@ ul.task-list li input[type="checkbox"] {
   });
   </script>
 </div> <!-- /content -->
-<script>var lightboxQuarto = GLightbox({"closeEffect":"zoom","descPosition":"bottom","loop":false,"openEffect":"zoom","selector":".lightbox"});
-(function() {
-  let previousOnload = window.onload;
-  window.onload = () => {
-    if (previousOnload) {
-      previousOnload();
-    }
-    lightboxQuarto.on('slide_before_load', (data) => {
-      const { slideIndex, slideNode, slideConfig, player, trigger } = data;
-      const href = trigger.getAttribute('href');
-      if (href !== null) {
-        const imgEl = window.document.querySelector(`a[href="${href}"] img`);
-        if (imgEl !== null) {
-          const srcAttr = imgEl.getAttribute("src");
-          if (srcAttr && srcAttr.startsWith("data:")) {
-            slideConfig.href = srcAttr;
-          }
-        }
-      } 
-    });
-  
-    lightboxQuarto.on('slide_after_load', (data) => {
-      const { slideIndex, slideNode, slideConfig, player, trigger } = data;
-      if (window.Quarto?.typesetMath) {
-        window.Quarto.typesetMath(slideNode);
-      }
-    });
-  
-  };
-  
-})();
-          </script>
 
 
 
