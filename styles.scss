@@ -1,9 +1,10 @@
 /*-- scss:defaults --*/
   $body-bg: #f8f9fa;        // Main background color
   $navbar-bg: #2c3e50;      // Custom navbar color
-  $link-color:  #338667 ; /*, #3B9A76, #46B48a;*/  // Custom accent color
+  $link-color:  #2C3E50 ; /*#338667 , #3B9A76, #46B48a;*/  // Custom accent color
   
-  /*-- scss:rules --*/
+/*-- scss:rules --*/
+
   body {
     background: linear-gradient(135deg, #E8FAEA 0%, #6DD19C 100%) no-repeat fixed; // Subtle gradient
   
@@ -14,6 +15,84 @@
     line-height: 1.6; /* Adds breathing room between lines for readability */
     margin: 0;
   }
+/* The Big Parent Container */
+  .hero-chunk {
+      margin: 40px auto;
+      background: rgba(255, 255, 255, 0.45);
+      backdrop-filter: blur(15px);
+      border-radius: 40px;
+      padding: 50px;
+      border: 1px solid rgba(255, 255, 255, 0.3);
+  }
+
+  .subtitle {
+      text-transform: uppercase;
+      letter-spacing: 1.5px;
+      font-size: 1.00rem;
+      color:#5D7B93;
+      font-weight: 700;
+      margin-bottom: 0;
+  }
+
+  .lead-text {
+      font-size: 1.25rem;
+      color: #2C3E50;
+      font-weight: 500;
+      margin-bottom: 1.5rem;
+  }
+
+  .info-box {
+      background: rgba(255, 255, 255, 0.5);
+      padding: 20px;
+      border-radius: 15px;
+      margin-top: 25px;
+      font-size: 0.95rem;
+      border: 1px solid rgba(255, 255, 255, 0.8);
+  }
+
+/* Icon Styling */
+  .info-box i {
+      margin-right: 10px;
+      color: #2C3E50;
+  }
+
+/* Image/GIF Styling */
+  .map-frame img {
+      width: 100%;           /* Fills its half of the screen */
+      border-radius: 20px;
+      box-shadow: 0 15px 35px rgba(0,0,0,0.1);
+  }
+
+  .caption-text {
+      font-size: 0.8rem;
+      text-align: center;
+      margin-top: 10px;
+      color: #666;
+  }
+/* Ensures the columns actually sit side-by-side */
+  .row {
+      display: flex;
+      flex-wrap: wrap;
+      width: 100%;
+  }
+
+  .col-md-6 {
+      flex: 0 0 50%;
+      max-width: 500px;
+      padding: 20px;
+  }
+
+/* Shrink the image so it doesn't break the layout */
+  .map-frame img {
+      width: 100%;
+      height: auto;
+      border-radius: 15px;
+  }
+
+
+
+/* The Bulleted list */
+
   .custom-list ul { /* ul == unordered list */
     list-style: none;
     padding-left: 1.5rem;
@@ -33,5 +112,52 @@
    
   }
 
+  // Modern "Chunk" section with glassmorphism effect
+  .section-chunk {
+    background: rgba(255, 255, 255, 0.6); // Semi-transparent white
+    backdrop-filter: blur(5px);           // Modern blur effect
+    padding: 60px 40px;                   // Breathing room
+    margin: 40px 0;                       // Vertical separation
+    border-radius: 15px;                  // Soft edges
+    border: 1px solid rgba(255, 255, 255, 0.3);
+  }
 
+/* Make the heading bold and professional */
+  .step h1 {
+    font-weight: 800;
+    color: #2C3E50;
+    margin-bottom: 1rem;
+  }
 
+/* Link Cards - the "Glassmorphism" look */
+  .data-link-card {
+    background: rgba(255, 255, 255, 0.5);
+    border-left: 5px solid #2C3E50;
+    padding: 1.5rem;
+    margin: 1.5rem 0;
+    border-radius: 15px;                  // Soft edges
+    transition: transform 0.2s ease;
+  }
+
+  .data-link-card:hover {
+    transform: translateX(10px);
+    background: rgba(255, 255, 255, 0.8);
+  }
+
+  .link-title {
+    color: #2C3E50;
+    text-decoration: none;
+    font-weight: 700;
+    border-bottom: 2px solid transparent;
+  }
+
+  .link-title:hover {
+    border-bottom: 2px solid #2C3E50;
+  }
+
+/* Make the image look like a real interface */
+  .image-frame img {
+    border-radius: 12px;
+    box-shadow: 0 20px 40px rgba(0,0,0,0.15);
+    border: 1px solid rgba(255,255,255,0.3);
+  }

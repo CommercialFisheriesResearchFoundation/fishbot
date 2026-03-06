@@ -12,110 +12,122 @@ about:
       text: GitHub
       href: https://github.com/CommercialFisheriesResearchFoundation/fishbot.git  
 ---
-<br>
-<br>
-<br>
-<br>
+<!--First Row with 'hero' style -->
+::: {.hero-chunk}
 
-:::: {.columns}
-::: {.column width="55%"}
-### A Cooperative Ocean Observing Product
-<br>
+::: {.container}
 
-#### **FIShBOT** is a new data product built to increase access to observations of underwater conditions collected by both fishing and science communities. 
+::: {.row .align-items-center}
 
+<!-- LEFT COLUMN: Text and Metadata -->
+::: {.col-md-6 .text-start}
 
-#### This standardized in-situ gridded dataset demonstrates the power of collaboration by integrating diverse oceanographic datasets in effort to transform raw information into impactful, real-world tools.
+<p class="subtitle">A Cooperative Ocean Observing Product</p>
 
-<br>
+<p class="lead-text">Transforming raw information into impactful, real-world tools.</p>
 
-#### **Temporal Range:** 2000-01-01 - Present Day
+**FIShBOT** was built to increase access to observations of underwater conditions collected by both fishing and science communities.
+All bottom data are standardized into a gridded dataset and updated every 24 hours.
 
-#### **Spatial Domain:** Western Gulf of Maine to Cape Hatteras 
+::: {.info-box}
+<i class="bi bi-calendar-range"></i> **Temporal Range:** 2000-01-01 – Present  
+
+<i class="bi bi-geo-alt-fill"></i> **Spatial Domain:** Western Gulf of Maine to Cape Hatteras
+
+![](images/fishbot-in-numbers.png)
+:::
 
 :::
 
-::: {.column width="5%"}
+<!-- RIGHT COLUMN: The GIF -->
+::: {.col-md-6}
+::: {.map-frame}
+![](images/FISHBOT_BottomTemp_2025-v4.gif)
+<p class="caption-text">FiShBOT Bottom Temperature (February 2025)</p>
+:::
+:::
+
+:::
+:::
+:::
+
+
+
+<!-- Middle Row with the new chunk style -->
+::: {.section-chunk}
+:::: {.columns}
+::: {.column width="40%"}
+<br>
+
+![](images/sensor_placement.png)
+<p class="caption-text">(L-R) Farrell Davis and Samir Patel (Coonamessett Farm Foundation), Huanxin Xu (Gulf of Maine Lobster Foundation), Captain Peter Barcz and Rio Ypon (F/V Atlantic) discuss placement of a sensor on a scallop dredge in New Bedford, MA. Photo credit: NOAA Fisheries</p>
+
+:::
+
+::: {.column width="5%"} 
 <!-- Empty column for spacing -->
 :::
 
 
-::: {.column width="40%"}
-![FIShBOT Bottom Temperature for 2025](images/FISHBOT_BottomTemp_2025-v4.gif){width='100%'}
-:::
-
-::::
-
-:::: {.columns}
-::: {.column width="40%"}
+::: {.column width="55%"}
+<br>
 <br>
 
-![(L-R) Farrell Davis and Samir Patel (Coonamessett Farm Foundation), Huanxin Xu (Gulf of Maine Lobster Foundation), Captain Peter Barcz and Rio Ypon (F/V Atlantic) discuss placement of a sensor on a scallop dredge in New Bedford, MA. Photo credit: NOAA Fisheries](images/sensor_placement.png)
-:::
-
-::: {.column width="5%"}
-<!-- Empty column for spacing -->
-:::
-
-
-::: {.column width="55%"}
 
 ## What data does FIShBOT provide? 
 #### Researchers and the fishing community alike share the need to better understand and monitor ocean conditions in our dynamic region. FIShBOT data comes directly from sensors that measure: 
 
+<br>
+
+![](images/high-temperature.png){height=1.5em}&nbsp;<b>Temperature</b>
 
 
-::: {.custom-list}
-- <b>Temperature</b>
-- <b>Salinity</b>
-- <b>Dissolved Oxygen</b>
+![](images/powder.png){height=1.5em}&nbsp;<b>Salinity</b>
+
+![](images/dissolved-oxygen-3.svg){height=1.5em}&nbsp;<b>Dissolved Oxygen</b>
+
+
 :::
-
-
-![](images/fishbot-in-numbers.png)
-
-:::
-
 ::::
+:::
 
- 
+<!-- Third Row with tiles -->
+::: {.step style="background-color: #E8F6F3;"}
+::: {.container}
+::: {.row .align-items-center}
 
-:::: {.columns}
+<!-- Left Side: Text Content -->
+::: {.col-md-6}
+# Where can you find **FIShBOT**?
+#### You can find us in lots of places!
 
-::: {.column width="55%"}
+::: {.data-link-card}
+### [[Our ERDDAP Data Server](https://erddap.ondeckdata.com/erddap/tabledap/fishbot_realtime.graph){target="_blank"}]{.link-title}
 
+Users can generate maps for any area on any given day. You can also download the data here!
+:::
+
+::: {.data-link-card}
+### [[Cape Cod Ocean Watch Data Portal](https://ccocean.whoi.edu/){target="_blank"}]{.link-title}
+FishBOT is a layer you can add on to the map for any given date!
+:::
+:::
+
+
+<!-- Right Side: Image/Portal Preview -->
+::: {.col-md-6}
+::: {.image-frame}
 <br>
+![](images/ccow_portal.png){fig-alt="Cape Cod Ocean Watch Portal"}
+<p class="caption-text">Cape Cod Ocean Watch Data Portal: An interactive tool by Woods Hole Oceanographic Institution</p>
 
-# Where can you find FIShBOT?
-#### You can find us lots of places! 
 
-::: {.custom-list}
-- <b>[Our ERDDAP Data Server](https://erddap.ondeckdata.com/erddap/tabledap/fishbot_realtime.graph):</b>
-Users can generate maps for any area on any given day. You can also download 
-the data here!
-- <b>[Cape Cod Ocean Watch Data Portal](https://ccocean.whoi.edu/):</b> FIShBOT is 
-   a layer you can add on to the map for any given date!
 :::
 :::
 
-
-::: {.column width="5%"}
-<!-- Empty column for spacing -->
 :::
-
-::: {.column width="40%"}
-<br>
-<br>
-
-
-#### Cape Cod Ocean Watch Data Poral
-![Cape Cod Ocean Watch Data Portal: An interactive tool by Woods Hole Oceanographic Institution](images/ccow_portal.png){width='100%}
 :::
-
-::::
-
-
-
+:::
 
 
 
