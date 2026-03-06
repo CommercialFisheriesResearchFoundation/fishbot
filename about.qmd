@@ -58,15 +58,15 @@ Memorandum and learn more!
 
 ### Data Contributors
 
-- Study Fleet (NEFSC-NOAA)
-- eMOLT (GOMLF, NOAA, CCS, UMaine, CFRF, CFF, ODN, Rutgers)
-- ECOMON (NEFSC-NOAA)
-- Lobster & Jonah Crab Research Fleet (CFRF)
-- Shelf Research Fleet (CFRF)
-- South Fork Wind Farm (CFRF)
-- Oleander XBT (BIOS)
-- Pioneer Array (OOI)
-- Gloucester Marine Genomics Institute (GMGI)
-- IOOS Glider Data Assembly Center (HZ, IOOS, OOI, NAVOCEANO, RU, SBU, UDel, UMaine, UMass, UGA USF, VIMS, WHOI)
+- [Study Fleet](https://www.fisheries.noaa.gov/new-england-mid-atlantic/science-data/cooperative-research-northeast#study-fleet) 
+- [eMOLT](https://www.fisheries.noaa.gov/new-england-mid-atlantic/climate/partnering-fishing-industry-monitor-northeast-shelf) 
+- [ECOMON](https://www.fisheries.noaa.gov/new-england-mid-atlantic/ecosystems/monitoring-ecosystem-northeast) 
+- [Lobster & Jonah Crab Research Fleet](https://www.cfrfoundation.org/jonah-crab-lobster-research-fleet) 
+- [Shelf Research Fleet](https://www.cfrfoundation.org/shelf-research-fleet) 
+- [South Fork Wind Farm Fisheries Monitoring](https://www.cfrfoundation.org/south-fork-wind-farm) 
+- [Oleander XBT](https://bios.asu.edu/oleander) 
+- [Pioneer Array](https://oceanobservatories.org/array/coastal-pioneer-mid-atlantic-bight-array/) 
+- [Gloucester Marine Genomics Institute](https://gmgi.org/) 
+- [IOOS Glider Data Assembly Center](https://gliders.ioos.us/providers/) 
 
 
