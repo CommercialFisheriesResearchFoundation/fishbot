@@ -1,9 +1,8 @@
 # Dataset configuration for various oceanographic datasets
 # This file contains the server URLs, dataset IDs, protocols, response formats,
 # and variables for each dataset used in the application.
-# The live lambda function will load this file dynamically.
 #-----------------------------------------------------------------------------
-# Note: The 'studyfleet' dataset is loaded from a local CSV file, so it does not have server or protocol information here.
+# Note: The 'studyfleet' and GMGI datasets are loaded from a local CSV file, so they do not have server or protocol information here.
 
 {
     "cfrf": {
@@ -34,14 +33,14 @@
             }
         },
         "variables": [
-            ["time","grid_id", "temperature", "salinity", "dissolved_oxygen", "institution"]
+            ["time","grid_id", "temperature", "salinity", "dissolved_oxygen", "institution", "latitude", "longitude","bottom_depth"]
         ]
     },
-    "emolt": {
+        "emolt": {
         "server": "https://erddap.emolt.net/erddap/",
-        "dataset_id": ["eMOLT_RT", "eMOLT_RT_LOWELL"],
-        "protocol": ["tabledap", "tabledap"],
-        "response": ["nc", "nc"],
+        "dataset_id": ["eMOLT_RT", "eMOLT_RT_LOWELL", "MCFA_RT"],
+        "protocol": ["tabledap", "tabledap", "tabledap"],
+        "response": ["nc", "nc", "nc"],
         "constraints": {
             "eMOLT_RT": {
                 "segment_type=": 3
@@ -51,12 +50,17 @@
                 "DO>": 0,
                 "temperature>": 0,
                 "temperature<": 27
+            },
+            "MCFA_RT": {
+                "segment_type=": 3
             }
         },
         "variables": [
             ["time", "latitude", "longitude",
                 "temperature", "tow_id", "depth"],  # for eMOLT_RT
-            ["time", "latitude", "longitude", "temperature", "DO", "tow_id"]
+            ["time", "latitude", "longitude", "temperature", "DO", "tow_id"],
+            ["time", "latitude", "longitude",
+                "temperature", "tow_id", "depth"]  # for MCFA_RT
         ]
     },
     "studyfleet": {
@@ -85,7 +89,7 @@
 
         "variables": [
             ["UTC_DATETIME", "latitude", "longitude", "sea_water_temperature", "pressure_dbars",
-             "dissolved_oxygen", "sea_water_salinity", "cast_number", "cruise_id"]
+             "dissolved_oxygen", "sea_water_salinity", "cast_number", "cruise_id", "bottom_depth"]
         ]
     },
     "oleander": {
